@@ -71,8 +71,7 @@ def get_growth_stock( stock_list):
     # print dp_price
     # print yearP[1]
     #todo： 去年全部 年报已公开，明年昨日再改
-    columns=[u'code', u'名称', u'1月强度', u'1年强度']+['%dEPS'% (yearL[3-i]) for i in range(1,4)] + [u'每股现金流', u'下年EPS', u'12L', u'12H'] + \
-        [(datetime.now()-timedelta(2)).strftime("%Y-%m-%d") ] + [u'资产负债率']# 2013 2014 2015
+    # 2013 2014 2015
     # print columns
     # yearP0 = get_fundamentals(q_PE_G2, statDate=str(yearL[0]))
     #print yearP[0][(yearP[0].code=='000001.XSHE')]
@@ -90,14 +89,14 @@ def get_growth_stock( stock_list):
         
         eps = [1]*4
         for j in range(4):
-            eps[j] = yearP[j][yearP[j].code==i]['basic_eps'].values
+            eps[j] = yearP[j][yearP[j].code==i]['basic_eps'].values[0]
         if eps[3]<0:
             continue
         # eps = [ yearP[j][ (yearP[j].code==i).loc[0, 'basic_eps'] ] for j in range(4) ]
         # print eps
         cap = [1]*4
         for j in range(4):
-            cap[j] = yearP[j][yearP[j].code==i]['capitalization'].values
+            cap[j] = yearP[j][yearP[j].code==i]['capitalization'].values[0]
         cap_now = df_now[df_now.code==i]['capitalization'].values
         flag = True        
         for j in range(3):      # 0:now 1:last
@@ -106,7 +105,7 @@ def get_growth_stock( stock_list):
                 break
         xjl =  yearP[0][yearP[0].code==i]['subtotal_operate_cash_inflow'].values - \
             yearP[0][yearP[0].code==i]['subtotal_operate_cash_outflow'].values
-        xjl = round(xjl/cap[0]/10000,2)
+        xjlb = round(xjl/cap[0]/10000/eps[0],2)
         if flag:
             #results.append([['%.2f'%eps[3-j]*cap[3-j]/cap[0]  for j in range(3)]])
             gg_price = get_price(i, start_date=last_year, end_date=datetime.now(), frequency='daily', fields='close')
@@ -119,12 +118,16 @@ def get_growth_stock( stock_list):
             ggqd12 = (gg_price['close'][last_month]-gg_price['close'][last_year])/gg_price['close'][last_year]
             xdqd12 = round((ggqd12 - dpqd12)/ abs(dpqd12),2)
             xdqd1 = round((ggqd1 - dpqd1)/ abs(dpqd1),2)
-            zcfzl = round(yearP[0][yearP[0].code==i]['total_liability'].values / yearP[0][yearP[0].code==i]['total_sheet_owner_equities'].values,2)
+            zcfzl = round(100*yearP[0][yearP[0].code==i]['total_liability'].values / yearP[0][yearP[0].code==i]['total_sheet_owner_equities'].values,2)
             #+ datetime.timedelta(days = -1)
             #results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12] + ['%.2f'%(eps[3-j]*cap[3-j]/cap[0])  for j in range(4)] + [xjl] )
-            eps_next = round(gg_price['close'][-2]/df_now[df_now.code==i]['pe_ratio'].values,2)
-            results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12] + ['%.2f'%(eps[3-j]*cap[3-j]/cap_now)  for j in range(1,4)] + [xjl, eps_next, low_price, high_price, gg_price['close'][-2], zcfzl] )
-            # print last_year
+            pe_ratio = df_now[df_now.code==i]['pe_ratio'].values[0]
+            eps_next = round(gg_price['close'][-2]/pe_ratio,2)
+            PEG = pe_ratio/((eps_next-eps[0])/eps[0]*100)
+            results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[3-j]*cap[3-j]/cap_now)  for j in range(1,4)] + [eps_next, pe_ratio, xjlb, low_price, high_price, zcfzl, '%.2f' %PEG] )
+            # print results
+    columns=[u'code', u'名称', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(2)).strftime("%m-%d") ] + ['%dEPS'% (yearL[3-i]) for i in range(1,4)] + [u'下年EPS', u'动态市盈率', u'现金比EPS', u'12L', u'12H', u'资产负债率', u'预期PEG']
+    # 
     czg = pd.DataFrame(data=results, columns=columns)
     return czg
     #print results
