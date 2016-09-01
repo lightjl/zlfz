@@ -97,7 +97,7 @@ def get_growth_stock( stock_list):
         cap = [1]*4
         for j in range(4):
             cap[j] = yearP[j][yearP[j].code==i]['capitalization'].values[0]
-        cap_now = df_now[df_now.code==i]['capitalization'].values
+        cap_now = df_now[df_now.code==i]['capitalization'].values[0]
         flag = True        
         for j in range(3):      # 0:now 1:last
             if eps[j]*cap[j] < (1+per)*eps[j+1]*cap[j+1]:
@@ -121,14 +121,24 @@ def get_growth_stock( stock_list):
             zcfzl = round(100*yearP[0][yearP[0].code==i]['total_liability'].values / yearP[0][yearP[0].code==i]['total_sheet_owner_equities'].values,2)
             #+ datetime.timedelta(days = -1)
             #results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12] + ['%.2f'%(eps[3-j]*cap[3-j]/cap[0])  for j in range(4)] + [xjl] )
+            '''
             pe_ratio = df_now[df_now.code==i]['pe_ratio'].values[0]
             eps_next = round(gg_price['close'][-2]/pe_ratio,2)
             PEG = pe_ratio/((eps_next-eps[0])/eps[0]*100)
-            results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[3-j]*cap[3-j]/cap_now)  for j in range(1,4)] + [eps_next, pe_ratio, xjlb, low_price, high_price, zcfzl, '%.2f' %PEG] )
+            '''
+            num_score = 0
+            if xdqd12 > xdqd1 and xdqd1 > 0:
+                num_score += 1
+            if xjlb > 1:
+                num_score += 1
+            if zcfzl < 50:
+                num_score += 1
+            results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[3-j]*cap[3-j]/cap_now)  for j in range(1,4)] + [xjlb, low_price, high_price, zcfzl, cap[0], cap_now, num_score] )
             # print results
-    columns=[u'code', u'名称', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(2)).strftime("%m-%d") ] + ['%dEPS'% (yearL[3-i]) for i in range(1,4)] + [u'下年EPS', u'动态市盈率', u'现金比EPS', u'12L', u'12H', u'资产负债率', u'预期PEG']
+    columns=[u'code', u'名称', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(2)).strftime("%m-%d") ] + ['%dEPS'% (yearL[3-i]) for i in range(1,4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
     # 
     czg = pd.DataFrame(data=results, columns=columns)
+    czg.sort(columns=u'分数', ascending = False, inplace=True)
     return czg
     #print results
     
