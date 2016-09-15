@@ -3,7 +3,8 @@
 
 import pandas as pd
 import time
-
+from datetime import date
+from datetime import timedelta
 '''
 ================================================================================
 总体回测前
@@ -20,7 +21,7 @@ def initialize(context):
 def set_params():
     g.tc = 1                                 # 调仓天数
     g.num_stocks = 10                        # 每次调仓选取的最大股票数量
-    g.stocks=get_index_stocks('000300.XSHG') # 设置沪深300为初始股票池
+    g.stocks=get_index_stocks('000002.XSHG') # 设置上市A股为初始股票池 000002.XSHG
     g.per = 0.1                              # EPS增长率不低于0.25
 
 #2
@@ -34,9 +35,6 @@ def set_variables():
 def set_backtest():
     set_option('use_real_price',True)        # 用真实价格交易
     log.set_level('order','debug')           # 设置报错等级
-
-
-
 
 '''
 ================================================================================
@@ -59,19 +57,23 @@ def before_trading_start(context):
 # 输出：unsuspened_stocks为list类型，表示当日未停牌的股票池，即：可行股票池
 def set_feasible_stocks(initial_stocks,context):
     # 判断初始股票池的股票是否停牌，返回list
-    paused_info = []
-    current_data = get_current_data()
-    for i in initial_stocks:
-        paused_info.append(current_data[i].paused)
-    df_paused_info = pd.DataFrame({'paused_info':paused_info},index = initial_stocks)
-    unsuspened_stocks =list(df_paused_info.index[df_paused_info.paused_info == False])
-    
-    df_st_info = get_extras('is_st',unsuspened_stocks,start_date=context.current_dt,end_date=context.current_dt)
-    df_st_info = df_st_info.T
-    df_st_info.rename(columns={df_st_info.columns[0]:'is_st'}, inplace=True)
-    unsuspened_stocks = list(df_st_info.index[df_st_info.is_st == False])
+    unsuspened_stocks =filter_paused_stock(initial_stocks)    
+    unsuspened_stocks = filter_st_stock(unsuspened_stocks)
     return unsuspened_stocks
 
+# 过滤停牌股票
+def filter_paused_stock(stock_list):
+    current_data = get_current_data()
+    return [stock for stock in stock_list if not current_data[stock].paused]
+    
+# 过滤ST及其他具有退市标签的股票
+def filter_st_stock(stock_list):
+    current_data = get_current_data()
+    return [stock for stock in stock_list 
+        if not current_data[stock].is_st 
+        and 'ST' not in current_data[stock].name 
+        and '*' not in current_data[stock].name 
+        and '退' not in current_data[stock].name]
 
 #5
 # 根据不同的时间段设置滑点与手续费
@@ -92,8 +94,6 @@ def set_slip_fee(context):
         set_commission(PerTrade(buy_cost=0.002, sell_cost=0.003, min_cost=5))
     else:
         set_commission(PerTrade(buy_cost=0.003, sell_cost=0.004, min_cost=5))
-
-
 
 
 '''
@@ -158,18 +158,25 @@ def get_growth_stock(context, stock_list):
     # 去除PE或G值为非数字的股票所在行
     df_Growth_PE_G.dropna()
 
-    year = context.current_dt.year
     list_stock = list(df_Growth_PE_G.loc[:,'code'])
-	
-    q_PE_G2 = query(valuation.code, valuation.capitalization, cash_flow.pubDate,indicator.eps,\
-	            cash_flow.subtotal_operate_cash_inflow, cash_flow.subtotal_operate_cash_outflow,\
-	            indicator.inc_operation_profit_year_on_year
-                 ).filter(valuation.code.in_(list_stock))
-
-    buy_list_stocks = []
     #K70 	房地产业    J66 货币金融服务
     list_fdc = get_industry_stocks('K70')
     list_hbjr = get_industry_stocks('J66')
+    
+    # 去掉房地产
+    for i in list_fdc:
+        if i in list_stock:
+            list_stock.remove(i)
+    
+    q_PE_G2 = query(valuation.code, valuation.capitalization, cash_flow.pubDate,\
+                indicator.eps, cash_flow.subtotal_operate_cash_inflow,\
+                cash_flow.subtotal_operate_cash_outflow,\
+	            indicator.inc_operation_profit_year_on_year, \
+                valuation.pe_ratio, balance.total_liability, \
+                balance.total_sheet_owner_equities, income.basic_eps
+                 ).filter(valuation.code.in_(list_stock))
+
+    buy_list_stocks = []
     # 查询股票池里股票的EPS,股本(万股),发布财报日期,eps,
     # 经营活动现金流入(元),经营活动现金流出(元)
     # 净利润同比增长率 ==> 每股现金流
@@ -180,66 +187,106 @@ def get_growth_stock(context, stock_list):
     # 每股现金流 > EPS(去年)
     # 相对强度 xdqd12 >= xdqd1 >=0	
     pe_ration_max = 40
+    
+    year = context.current_dt.year
+    month = context.current_dt.month
+    yearP1 = get_fundamentals(q_PE_G2, statDate=str(year-1))
+    yearL = [year-5+i for i in range(5)]  # 2011 2012 2013 2014 2015 今年2016
+    yearP = [get_fundamentals(q_PE_G2, statDate=str(yearL[i])) for i in range(5)]
+    q_now = query(valuation.code, valuation.capitalization, valuation.pe_ratio)
+    df_now = get_fundamentals(q_now)
+    last_month = date(year,month,1)-timedelta(1) 
+    if month > 1:
+        last_2month = date(year,month-1,1)-timedelta(1)
+    else:
+        last_2month = date(year-1,12,1)-timedelta(1)
+    last_year = date(year-1,month,1)-timedelta(1) 
+    
+    dp_price = get_price('000001.XSHG', start_date=last_year-timedelta(20), end_date=last_month+timedelta(1) , frequency='daily', fields='close')
+    
+    while last_month not in dp_price.index:
+        last_month = last_month-timedelta(1) 
+    while last_2month not in dp_price.index:
+        last_2month = last_2month-timedelta(1) 
+    while last_year not in dp_price.index:
+        last_year = last_year-timedelta(1)
+    
+    
     for i in list_stock:
-        # 去掉房地产
-        if i in list_fdc:
-            continue
+        '''
         q_PE_G2 = query(valuation.code, valuation.capitalization, cash_flow.pubDate,income.basic_eps, valuation.circulating_market_cap, \
 	            cash_flow.subtotal_operate_cash_inflow, cash_flow.subtotal_operate_cash_outflow,\
 	            indicator.inc_operation_profit_year_on_year
                  ).filter(valuation.code == i)
-        yearP1 = get_fundamentals(q_PE_G2, statDate=str(year-1))
-        if yearP1.empty:
-            continue
+        '''
         # 流通市值>500跳过
         #if yearP1.loc[0,'circulating_market_cap'] > 500:
         #    continue
         #log.info(yearP1)
-        
-        if context.current_dt.strftime("%Y-%m-%d") > yearP1.loc[0,'pubDate']:
-            yearL1 = year-1
-            yearL2 = year-2
-            yearL3 = year-3
-            yearL4 = year-4
-        else:
-            yearL1 = year-2
-            yearL2 = year-3
-            yearL3 = year-4
-            yearL4 = year-5
+        startth = 0
+        if context.current_dt.strftime("%Y-%m-%d") < yearP1.loc[0,'pubDate']:
+            start_yearth = 1
+        # 回测当天，前4年的已出的年报有无空的    
+        flag_empty = False
+        for j in range(startth, 4+startth):
+            if yearP[j][yearP[j].code==i].empty:
+                flag_empty = True
+                break
+        if flag_empty:
+            continue
+        '''
         yearP1 = get_fundamentals(q_PE_G2, statDate=str(yearL1))
         yearP2 = get_fundamentals(q_PE_G2, statDate=str(yearL2))
         yearP3 = get_fundamentals(q_PE_G2, statDate=str(yearL3))
         yearP4 = get_fundamentals(q_PE_G2, statDate=str(yearL4))
-        
-        
+        '''
+        eps = [1]*4     # 2011 2012 2013 2014 or 2012 ... 今年2016
+        for j in range(4):
+            eps[j] = yearP[j+startth][yearP[j+startth].code==i]['basic_eps'].values[0]
+        if eps[0]<0:
+            continue
+        cap = [1]*4     # 2011 2012 2013 2014 or 2012 ... 今年2016
+        for j in range(4):
+            cap[j] = yearP[j+startth][yearP[j+startth].code==i]['capitalization'].values[0]
+        cap_now = df_now[df_now.code==i]['capitalization'].values[0]
+        '''
         if yearP4.empty or yearP3.empty or yearP2.empty or yearP1.empty:
             continue
-        
-            #
-        if yearP1.loc[0, 'basic_eps']*yearP1.loc[0, 'capitalization'] >= (1+g.per)*yearP2.loc[0, 'basic_eps']*yearP2.loc[0, 'capitalization'] and \
-             yearP2.loc[0, 'basic_eps']*yearP2.loc[0, 'capitalization'] >= (1+g.per)*yearP3.loc[0, 'basic_eps']*yearP3.loc[0, 'capitalization'] and \
-             yearP3.loc[0, 'basic_eps']*yearP3.loc[0, 'capitalization'] >= (1+g.per)*yearP4.loc[0, 'basic_eps']*yearP4.loc[0, 'capitalization']:
-            
+        '''
+        flag_cz = True        
+        for j in range(3):      # 2011 2012 2013 2014 or 2012 ... 今年2016
+            if (1+g.per)*eps[j]*cap[j] > eps[j+1]*cap[j+1]:
+                # 增长不达
+                flag_cz = False
+                break
+        # todo
+        if flag_cz:
+            '''
+            if yearP1.loc[0, 'basic_eps']*yearP1.loc[0, 'capitalization'] >= (1+g.per)*yearP2.loc[0, 'basic_eps']*yearP2.loc[0, 'capitalization'] and \
+                 yearP2.loc[0, 'basic_eps']*yearP2.loc[0, 'capitalization'] >= (1+g.per)*yearP3.loc[0, 'basic_eps']*yearP3.loc[0, 'capitalization'] and \
+                 yearP3.loc[0, 'basic_eps']*yearP3.loc[0, 'capitalization'] >= (1+g.per)*yearP4.loc[0, 'basic_eps']*yearP4.loc[0, 'capitalization']:
+            '''    
             #log.info("code=%s, market_cap=%d", i, yearP1.loc[0, 'circulating_market_cap'])
             #log.debug(yearP1)
             #log.debug(yearP2) 
             #log.debug(yearP3)
             #log.debug(yearP4)
             # 动态市盈率 负债合计(元)/负债和股东权益合计
+            '''
             q_PE_G = query(valuation.pe_ratio, balance.total_liability, balance.total_sheet_owner_equities
                     ).filter(valuation.code == i)
             jbm = get_fundamentals(q_PE_G, statDate=str(year-1))
-            
+            '''
             #满分 1+1+1
-            valueOfStock = 0
+            scoreOfStock = 0
             # pe_ratio 动态市盈率  负债合计(元)/负债和股东权益合计= 资产负债率 < 0.5
-            zcfzl = jbm.loc[0, 'total_liability']/jbm.loc[0, 'total_sheet_owner_equities']
-            if jbm.loc[0, 'pe_ratio'] <= pe_ration_max:
+            zcfzl = yearP1.loc[0, 'total_liability']/yearP1.loc[0, 'total_sheet_owner_equities']
+            if yearP1.loc[0, 'pe_ratio'] <= pe_ration_max:
                 if zcfzl<0.5:
-                    valueOfStock = valueOfStock + 1
+                    scoreOfStock = scoreOfStock + 1
                 #每股现金流 > EPS(去年)
                 if yearP1.loc[0, 'subtotal_operate_cash_inflow'] - yearP1.loc[0, 'subtotal_operate_cash_outflow'] > yearP1.loc[0, 'basic_eps']*yearP1.loc[0, 'capitalization']:
-                    valueOfStock = valueOfStock + 1
+                    scoreOfStock = scoreOfStock + 1
                 # 相对强度
                 h = history(260, security_list=['000001.XSHG', i])
                 dpqd1 = (h['000001.XSHG'][-1]-h['000001.XSHG'][-22])/h['000001.XSHG'][-22]
@@ -249,12 +296,12 @@ def get_growth_stock(context, stock_list):
                 xdqd12 = (ggqd12 - dpqd12)/ abs(dpqd12)
                 xdqd1 = (ggqd1 - dpqd1)/ abs(dpqd1)
                 if xdqd12 >= xdqd1 and xdqd1 >= 0:
-                    valueOfStock = valueOfStock + 1
-                if valueOfStock >= 2:
+                    scoreOfStock = scoreOfStock + 1
+                if scoreOfStock >= 3:
                     buy_list_stocks.append(i)
             #log.info(yearP2)
             #log.info(yearP3)
-            #log.info("code=%s, zcfzl=%.2f, sylyc=%f, yearL1 = %d, P1=%f, P2=%f, P3=%f", i, zcfzl, jbm.loc[0, 'pe_ratio'], \
+            #log.info("code=%s, zcfzl=%.2f, sylyc=%f, yearL1 = %d, P1=%f, P2=%f, P3=%f", i, zcfzl, yearP1.loc[0, 'pe_ratio'], \
             #                yearL1, yearP1.loc[0, 'eps'], yearP2.loc[0, 'eps'], yearP3.loc[0, 'eps'])
     return buy_list_stocks
     
