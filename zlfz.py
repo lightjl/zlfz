@@ -5,6 +5,7 @@ import pandas as pd
 import time
 from datetime import date
 from datetime import timedelta
+import tradestat
 '''
 ================================================================================
 总体回测前
@@ -15,6 +16,9 @@ def initialize(context):
     set_params()                             # 设置策略常量
     set_variables()                          # 设置中间变量
     set_backtest()                           # 设置回测条件
+    # 加载统计模块
+    if g.flag_stat:
+        g.trade_stat = tradestat.trade_stat()
 
 #1 
 #设置策略参数
@@ -22,7 +26,9 @@ def set_params():
     g.tc = 1                                 # 调仓天数
     g.num_stocks = 10                        # 每次调仓选取的最大股票数量
     g.stocks=get_index_stocks('000002.XSHG') # 设置上市A股为初始股票池 000002.XSHG
+    g.stocks=get_index_stocks('000300.XSHG') # 设置上市A股为初始股票池 000300.XSHG
     g.per = 0.1                              # EPS增长率不低于0.25
+    g.flag_stat = True                       # 默认不开启统计
 
 #2
 #设置中间变量
@@ -297,7 +303,7 @@ def get_growth_stock(context, stock_list):
                 xdqd1 = (ggqd1 - dpqd1)/ abs(dpqd1)
                 if xdqd12 >= xdqd1 and xdqd1 >= 0:
                     scoreOfStock = scoreOfStock + 1
-                if scoreOfStock >= 3:
+                if scoreOfStock >= 2:
                     buy_list_stocks.append(i)
             #log.info(yearP2)
             #log.info(yearP3)
@@ -362,7 +368,7 @@ def get_clear_stock(context, stock_list_now, stock_list_buy):
     for id in stock_can_buy:
         if id not in news_ids:
             news_ids.append(id)
-    log.info(news_ids, "stock_can_buy")
+    #log.debug(news_ids, "stock_can_buy")
     
     
     # 得到一个dataframe：index为股票代码，data为相应的PEG值
@@ -445,8 +451,9 @@ def buy_operation(context, list_to_buy):
 ================================================================================
 '''
 # 每天收盘后做的事情
-# 进行长运算（本策略中不需要）
 def after_trading_end(context):
+    if g.flag_stat:
+        g.trade_stat.report(context)
     return
     
 
