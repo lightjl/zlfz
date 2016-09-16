@@ -23,7 +23,6 @@ def initialize(context):
 #1 
 #设置策略参数
 def set_params():
-    g.tc = 1                                 # 调仓天数
     g.num_stocks = 10                        # 每次调仓选取的最大股票数量
     g.stocks=get_index_stocks('000002.XSHG') # 设置上市A股为初始股票池 000002.XSHG
     g.stocks=get_index_stocks('000300.XSHG') # 设置上市A股为初始股票池 000300.XSHG
@@ -33,8 +32,7 @@ def set_params():
 #2
 #设置中间变量
 def set_variables():
-    g.t = 0                                  # 记录回测运行的天数
-    g.if_trade = False                       # 当天是否交易
+    return None
 
 #3
 #设置回测条件
@@ -49,12 +47,10 @@ def set_backtest():
 '''
 #每天开盘前要做的事情
 def before_trading_start(context):
-    if g.t%g.tc==0:
-        g.if_trade=True                       # 每g.tc天，调仓一次
-        set_slip_fee(context)                 # 设置手续费与手续费
-        # 设置可行股票池
-        g.feasible_stocks = set_feasible_stocks(g.stocks,context)
-    g.t+=1
+    set_slip_fee(context)                 # 设置手续费与手续费
+    # 设置可行股票池
+    g.feasible_stocks = set_feasible_stocks(g.stocks,context)
+    g.feasible_stocks = stocks_can_buy(context)
     
     
 #4
@@ -109,18 +105,14 @@ def set_slip_fee(context):
 '''
 # 每天回测时做的事情
 def handle_data(context,data):
-    if g.if_trade == True:
-        # 待买入的g.num_stocks支股票，list类型
-        list_can_buy = stocks_to_buy(context)
-        # 待卖出的股票，list类型
-        list_to_sell = stocks_to_sell(context, list_can_buy)
-        # 需买入的股票
-        list_to_buy = pick_buy_list(context, list_can_buy)
-        # 卖出操作
-        sell_operation(list_to_sell)
-        # 买入操作
-        buy_operation(context, list_to_buy)
-    g.if_trade = False
+    # 待卖出的股票，list类型
+    list_to_sell = stocks_to_sell(context, g.feasible_stocks)
+    # 需买入的股票
+    list_to_buy = pick_buy_list(context, g.feasible_stocks)
+    # 卖出操作
+    sell_operation(context,list_to_sell)
+    # 买入操作
+    buy_operation(context, list_to_buy)
     
 #6
 # 计算股票的PEG值
@@ -219,12 +211,6 @@ def get_growth_stock(context, stock_list):
     
     
     for i in list_stock:
-        '''
-        q_PE_G2 = query(valuation.code, valuation.capitalization, cash_flow.pubDate,income.basic_eps, valuation.circulating_market_cap, \
-	            cash_flow.subtotal_operate_cash_inflow, cash_flow.subtotal_operate_cash_outflow,\
-	            indicator.inc_operation_profit_year_on_year
-                 ).filter(valuation.code == i)
-        '''
         # 流通市值>500跳过
         #if yearP1.loc[0,'circulating_market_cap'] > 500:
         #    continue
@@ -240,12 +226,6 @@ def get_growth_stock(context, stock_list):
                 break
         if flag_empty:
             continue
-        '''
-        yearP1 = get_fundamentals(q_PE_G2, statDate=str(yearL1))
-        yearP2 = get_fundamentals(q_PE_G2, statDate=str(yearL2))
-        yearP3 = get_fundamentals(q_PE_G2, statDate=str(yearL3))
-        yearP4 = get_fundamentals(q_PE_G2, statDate=str(yearL4))
-        '''
         eps = [1]*4     # 2011 2012 2013 2014 or 2012 ... 今年2016
         for j in range(4):
             eps[j] = yearP[j+startth][yearP[j+startth].code==i]['basic_eps'].values[0]
@@ -255,10 +235,7 @@ def get_growth_stock(context, stock_list):
         for j in range(4):
             cap[j] = yearP[j+startth][yearP[j+startth].code==i]['capitalization'].values[0]
         cap_now = df_now[df_now.code==i]['capitalization'].values[0]
-        '''
-        if yearP4.empty or yearP3.empty or yearP2.empty or yearP1.empty:
-            continue
-        '''
+        
         flag_cz = True        
         for j in range(3):      # 2011 2012 2013 2014 or 2012 ... 今年2016
             if (1+g.per)*eps[j]*cap[j] > eps[j+1]*cap[j+1]:
@@ -267,22 +244,13 @@ def get_growth_stock(context, stock_list):
                 break
         # todo
         if flag_cz:
-            '''
-            if yearP1.loc[0, 'basic_eps']*yearP1.loc[0, 'capitalization'] >= (1+g.per)*yearP2.loc[0, 'basic_eps']*yearP2.loc[0, 'capitalization'] and \
-                 yearP2.loc[0, 'basic_eps']*yearP2.loc[0, 'capitalization'] >= (1+g.per)*yearP3.loc[0, 'basic_eps']*yearP3.loc[0, 'capitalization'] and \
-                 yearP3.loc[0, 'basic_eps']*yearP3.loc[0, 'capitalization'] >= (1+g.per)*yearP4.loc[0, 'basic_eps']*yearP4.loc[0, 'capitalization']:
-            '''    
             #log.info("code=%s, market_cap=%d", i, yearP1.loc[0, 'circulating_market_cap'])
             #log.debug(yearP1)
             #log.debug(yearP2) 
             #log.debug(yearP3)
             #log.debug(yearP4)
             # 动态市盈率 负债合计(元)/负债和股东权益合计
-            '''
-            q_PE_G = query(valuation.pe_ratio, balance.total_liability, balance.total_sheet_owner_equities
-                    ).filter(valuation.code == i)
-            jbm = get_fundamentals(q_PE_G, statDate=str(year-1))
-            '''
+            
             #满分 1+1+1
             scoreOfStock = 0
             # pe_ratio 动态市盈率  负债合计(元)/负债和股东权益合计= 资产负债率 < 0.5
@@ -315,8 +283,8 @@ def get_growth_stock(context, stock_list):
 # 获得买入信号
 # 输入：context(见API)
 # 输出：list_to_buy为list类型,表示待买入的g.num_stocks支股票
-def stocks_to_buy(context):
-    list_to_buy = []
+def stocks_can_buy(context):
+    list_can_buy = []
     # 得到一个dataframe：index为股票代码，data为相应的PEG值
     df_PEG = get_PEG(context, get_growth_stock(context, g.feasible_stocks))
     # 将股票按PEG升序排列，返回daraframe类型
@@ -326,8 +294,9 @@ def stocks_to_buy(context):
         
     for i in range(nummax):
         if df_sort_PEG.ix[i,0] < 0.75:
-            list_to_buy.append(df_sort_PEG.index[i])
-    return list_to_buy
+            list_can_buy.append(df_sort_PEG.index[i])
+    return list_can_buy
+    
     
     
 # 已不再具有持有优势的股票
@@ -421,14 +390,26 @@ def stocks_to_sell(context, list_to_buy):
 
     return list_to_sell
 
-
+# 平仓，卖出指定持仓
+# 平仓成功并全部成交，返回True
+# 报单失败或者报单成功但被取消（此时成交量等于0），或者报单非全部成交，返回False
+def close_position(position):
+    security = position.security
+    order = order_target_value_(security, 0) # 可能会因停牌失败
+    if order != None:
+        if order.filled > 0 and g.flag_stat:
+            # 只要有成交，无论全部成交还是部分成交，则统计盈亏
+            g.trade_stat.watch(security, order.filled, position.avg_cost, position.price)
+    return False
+    
 #9
 # 执行卖出操作
 # 输入：list_to_sell为list类型，表示待卖出的股票
 # 输出：none
-def sell_operation(list_to_sell):
+def sell_operation(context, list_to_sell):
     for stock_sell in list_to_sell:
-        order_target_value(stock_sell, 0)
+        position = context.portfolio.positions[stock_sell]
+        close_position(position)
 
 
 #10
@@ -441,9 +422,6 @@ def buy_operation(context, list_to_buy):
         g.capital_unit=context.portfolio.portfolio_value/g.num_stocks
         # 买入在"待买股票列表"的股票
         order_target_value(stock_buy, g.capital_unit)
-
-
-
 
 '''
 ================================================================================
