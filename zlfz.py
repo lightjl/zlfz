@@ -383,13 +383,21 @@ def pick_buy_list(context, data, list_can_buy):
         for stock in list_can_buy:
             if stock in context.portfolio.positions.keys():
                 continue
+            ma20 = count_ma(stock, 20, 0)
+            close2day = history(2, '1d', 'close', [stock],df = False)[stock]
+            if is_struggle(close2day[-2],close2day[-1],ma20):
+                continue
+            if close2day[-2] < ma20 and close2day[-1] > ma20:
+                list_to_buy.append(stock)
+                ad_num += 1
+                if ad_num >= buy_num:
+                    break
+                
             '''
             if stock not in context.portfolio.positions.keys():
                 list_to_buy.append(stock)
-            close = history(1, '1d', 'close', [stock],df = False)[stock][0]
             # MA60上才考虑买
             ma60 = count_ma(stock, 60, 0)
-            ma20 = count_ma(stock, 20, 0)
             if close < ma60:
                 continue
             '''
@@ -407,7 +415,6 @@ def pick_buy_list(context, data, list_can_buy):
                         if ad_num >= buy_num:
                             break
                         continue
-            '''
             # 空头排列后金叉——满仓买入 10, 20 金叉
             if is_crossUP(data,stock,10, 20):
                 if is_struggle(count_ma(stock,10,0), \
@@ -417,6 +424,7 @@ def pick_buy_list(context, data, list_can_buy):
                 ad_num += 1
                 if ad_num >= buy_num:
                     break
+            '''
     else:
         for stock in list_can_buy:
             if stock in context.portfolio.positions.keys():
@@ -530,7 +538,22 @@ def stocks_djx_to_sell(context, data):
             list_to_sell.append(i)
         '''
     return list_to_sell
-
+# 获得均线卖出信号
+# 输入：context（见API文档）
+# 输出：list_to_sell为list类型，表示待卖出的股票
+def stocks_udma_to_sell(context, data):
+    list_to_sell = []
+    list_hold = context.portfolio.positions.keys()
+    if len(list_hold) == 0:
+        return list_to_sell
+    for stock in list_hold:
+        ma20 = count_ma(stock, 20, 0)
+        close2day = history(2, '1d', 'close', [stock],df = False)[stock]
+        if is_struggle(close2day[-2],close2day[-1],ma20):
+            continue
+        if close2day[-2] > ma20 and close2day[-1] < ma20:
+            list_to_sell.append(stock)
+    return list_to_sell
 #8
 # 获得卖出信号
 # 输入：context（见API文档）, list_to_buy为list类型，代表待买入的股票
@@ -540,7 +563,7 @@ def stocks_to_sell(context, data, list_to_buy):
     list_to_sell = []
     list_to_sell = get_clear_stock(context, list_to_buy)
     if g.trade_skill:
-        list_to_sell2 = stocks_djx_to_sell(context, data)
+        list_to_sell2 = stocks_udma_to_sell(context, data)
         for i in list_to_sell2:
             if i not in list_to_sell:
                 list_to_sell.append(i)
