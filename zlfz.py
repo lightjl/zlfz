@@ -37,7 +37,7 @@ def set_params():
     
     g.per = 0.05                                 # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
-    g.trade_skill = False                        # 不开启交易策略
+    g.trade_skill = True                         # 开启交易策略
 
 #2
 #设置中间变量
@@ -386,13 +386,15 @@ def pick_buy_list(context, data, list_can_buy):
             '''
             if stock not in context.portfolio.positions.keys():
                 list_to_buy.append(stock)
-            '''
             close = history(1, '1d', 'close', [stock],df = False)[stock][0]
             # MA60上才考虑买
             ma60 = count_ma(stock, 60, 0)
             ma20 = count_ma(stock, 20, 0)
             if close < ma60:
                 continue
+            '''
+            
+            '''
             # 多头排列——满仓买入
             if is_highest_point(data,stock,0):
                 # 均线纠缠时，不进行买入操作
@@ -408,11 +410,13 @@ def pick_buy_list(context, data, list_can_buy):
             '''
             # 空头排列后金叉——满仓买入 10, 20 金叉
             if is_crossUP(data,stock,10, 20):
-                    list_to_buy.append(stock)
-                    ad_num += 1
-                    if ad_num >= buy_num:
-                        break
-            '''
+                if is_struggle(count_ma(stock,10,0), \
+                    count_ma(stock,20,0),count_ma(stock,30,0)):
+                    continue
+                list_to_buy.append(stock)
+                ad_num += 1
+                if ad_num >= buy_num:
+                    break
     else:
         for stock in list_can_buy:
             if stock in context.portfolio.positions.keys():
@@ -423,54 +427,7 @@ def pick_buy_list(context, data, list_can_buy):
                 break
             
     return list_to_buy
-'''  
-def stocks_can_buy(data, context):
-    list_can_buy = []
-    # current_data = get_current_data()
-    # current_data[stock].close:
-    for stock in g.stock:
-        #log.debug('%s, 5day before ma5= %.2f' ,stock, count_ma(stock, 5, 5))
-        if stock in context.portfolio.positions.keys():
-            continue
-        
-        close = history(1, '1d', 'close', [stock],df = False)[stock][0]
-        # MA60上才考虑买
-        ma60 = count_ma(stock, 60, 0)
-        ma20 = count_ma(stock, 20, 0)
-        if close < ma60:
-            continue
-        # 多头排列——满仓买入
-        if is_highest_point(data,stock,-1):
-            if close < ma20:
-                #log.debug('%s, %.2f, MA20=%.2f', stock, close, ma20)
-                list_can_buy.append(stock)
-                #order_target_value(stock,g.cash)
-        
-    return list_can_buy
-    
-# 获得买入的list_to_buy
-# 输入list_can_buy 为list，可以买的队列
-# 输出list_to_buy 为list，买入的队列
-def pick_buy_list(context, data, list_can_buy, list_to_sell):
-    list_to_buy = []
-    # 要买数 = 可持数 - 持仓数 + 要卖数
-    buy_num = g.num_stocks - len(context.portfolio.positions.keys()) + len(list_to_sell)
-    if buy_num <= 0:
-        return list_to_buy
-    # 得到一个dataframe：index为股票代码，data为相应的PEG值
-    # 处理-------------------------------------------------
-    current_data = get_current_data()
-    ad_num = 0;
-    for i in list_can_buy:
-        if i not in context.portfolio.positions.keys():
-            # 没有持仓这股票, 假如这股票此时红盘就买入
-            # if data[i].close > current_data[i].day_open:
-            list_to_buy.append(i)
-            ad_num = ad_num + 1
-        if ad_num >= buy_num:
-            break
-    return list_to_buy 
-'''    
+
 # 已不再具有持有优势的股票
 # 输入：context(见API)；stock_list_now为list类型，表示初始持有股, stock_list_buy为list类型，表示可以买入的股票
 # 输出：应清仓的股票 list
@@ -547,20 +504,22 @@ def stocks_djx_to_sell(context, data):
         return list_to_sell
     
     for i in list_hold:
+        '''
         close = history(1, '1d', 'close', [i],df = False)[i][0]
         # 跌到MA60卖
         ma60 = count_ma(i, 60, 0)
         if close < ma60:
             list_to_sell.append(i)
             continue
+        '''
         # 均线纠缠时，不进行操作
-        if is_struggle(count_ma(i,5,1),count_ma(i,20,1),count_ma(i,60,1)):
+        if is_struggle(count_ma(i,5,1),count_ma(i,10,1),count_ma(i,20,1)):
             continue
         # 空头排列——清仓卖出
         if is_lowest_point(data,i,-1):
             list_to_sell.append(i)
-        # 多头排列后死叉——清仓卖出 20 叉 60
-        elif is_crossDOWN(data,i,20,60):
+        # 多头排列后死叉——清仓卖出 10 叉 20
+        elif is_crossDOWN(data,i,10,20):
             list_to_sell.append(i)
         '''
         if context.portfolio.positions[i].avg_cost *0.95 >= data[i].close:
