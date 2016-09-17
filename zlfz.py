@@ -24,16 +24,8 @@ def initialize(context):
 #设置策略参数
 def set_params():
     g.num_stocks = 5                             # 每次调仓选取的最大股票数量
-    #g.stocks=get_all_securities(['stock'])      # 设置上市A股为初始股票池 000002.XSHG
-    g.stocks=get_index_stocks('000300.XSHG')     # 设置沪深300为初始股票池 000300.XSHG
-    
-    g.stocks=get_index_stocks('399630.XSHE')     # 设置1000成长为初始股票池 399630.XSHE
-    stocks_cz=get_index_stocks('000057.XSHG')    # 设置全指成长为初始股票池 000057.XSHG
-    for i in stocks_cz:
-        if i not in g.stocks:
-            g.stocks.append(i)
-    # log.debug(g.stocks)
-    
+    g.stocks=get_all_securities(['stock']).index # 设置上市A股为初始股票池 000002.XSHG
+   
     
     g.per = 0.05                                 # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
