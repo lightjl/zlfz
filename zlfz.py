@@ -23,9 +23,9 @@ def initialize(context):
 #1 
 #设置策略参数
 def set_params():
-    g.num_stocks = 10                        # 每次调仓选取的最大股票数量
+    g.num_stocks = 5                         # 每次调仓选取的最大股票数量
     g.stocks=get_index_stocks('000002.XSHG') # 设置上市A股为初始股票池 000002.XSHG
-    g.stocks=get_index_stocks('000300.XSHG') # 设置上市A股为初始股票池 000300.XSHG
+    #g.stocks=get_index_stocks('000300.XSHG')# 设置上市A股为初始股票池 000300.XSHG
     g.per = 0.1                              # EPS增长率不低于0.25
     g.flag_stat = True                       # 默认不开启统计
 
@@ -106,9 +106,9 @@ def set_slip_fee(context):
 # 每天回测时做的事情
 def handle_data(context,data):
     # 待卖出的股票，list类型
-    list_to_sell = stocks_to_sell(context, g.feasible_stocks)
+    list_to_sell = stocks_to_sell(context, data, g.feasible_stocks)
     # 需买入的股票
-    list_to_buy = pick_buy_list(context, g.feasible_stocks)
+    list_to_buy = pick_buy_list(context, data, g.feasible_stocks)
     # 卖出操作
     sell_operation(context,list_to_sell)
     # 买入操作
@@ -298,15 +298,113 @@ def stocks_can_buy(context):
     return list_can_buy
     
     
+ 
+'''
+================================================================================
+多均线策略
+================================================================================
+'''
+# 判断均线纠缠
+def is_struggle(mavg1,mavg2,mavg3):
+    if abs((mavg1-mavg2)/mavg2)< 0.003\
+    or abs((mavg2-mavg3)/mavg3)< 0.002:
+        return True
+    return False
     
+# 计算股票过去n个单位时间（一天）均值
+# n 天的MA， day_before天前
+def count_ma(stock,n, day_before):
+    #log.debug(history(n, '1d', 'close', [stock])[stock])
+    #log.debug(history(n, '1d', 'close', [stock],df = False)[stock].mean())
+    return history(n+day_before, '1d', 'close', [stock],df = False)[stock][0:n].mean()
+
+
+# 判断多头排列 5 10 20 30
+def is_highest_point(data,stock,n):
+    if count_ma(stock,5,n) > count_ma(stock,10,n)\
+    and count_ma(stock,10,n) > count_ma(stock,20,n)\
+    and count_ma(stock,20,n) > count_ma(stock,30,n):
+        #log.debug('%s, ma5=%.2f, ma10=%.2f, ma20=%.2f, ma30=%.2f', stock, count_ma(stock,5,-n)\
+        #,count_ma(stock,10,-n),count_ma(stock,20,-n),count_ma(stock,30,-n))
+        return True
+    return False
+
+# 判断空头排列——空仓 5 10 20
+def is_lowest_point(data,stock,n):
+    if count_ma(stock,5,n) < count_ma(stock,10,n)\
+    and count_ma(stock,10,n) < count_ma(stock,20,n):
+        log.debug('%d, %s, ma5=%.2f, ma10=%.2f, ma20=%.2f',n, stock, count_ma(stock,5,n), count_ma(stock,10,n), count_ma(stock,20,n))
+        return True
+    return False
+    
+    
+# 判断10日线， 20日线空头排列后的金叉——买入
+def is_crossUP(data,stock,short,long):
+    if is_lowest_point(data,stock,1) and is_lowest_point(data,stock,2):
+        if count_ma(stock, short, 1) < count_ma(stock, long, 1)\
+        and count_ma(stock, short, 0) > count_ma(stock, long, 0):
+            return True
+    return False
+
+# 判断多头排列后的死叉——卖出
+def is_crossDOWN(data,stock,short,long):
+    if is_highest_point(data,stock,1) and is_highest_point(data,stock,2):
+        if count_ma(stock, short, 1) > count_ma(stock, long, 1)\
+        and count_ma(stock, short, 0) < count_ma(stock, long, 0):
+            log.debug('%s, MAs-2:%.2f, MAl-2:%.2f; MAs-1:%.2f MAl-1:%.2f', stock, count_ma(stock, short, 1), count_ma(stock, long, 1), count_ma(stock, short, 0), count_ma(stock, long, 0))
+            return True
+    return False
+'''
+================================================================================
+多均线策略
+================================================================================
+''' 
+# 获得买入的list_to_buy
+# 输入list_can_buy 为list，可以买的队列
+# 输出list_to_buy 为list，买入的队列
+def pick_buy_list(context, data, list_can_buy):
+    list_to_buy = []
+    buy_num = g.num_stocks - len(context.portfolio.positions.keys())
+    if buy_num <= 0:
+        return list_to_buy
+    # 得到一个dataframe：index为股票代码，data为相应的PEG值
+    for stock in list_can_buy:
+        if stock in context.portfolio.positions.keys():
+            continue
+        '''
+        if stock not in context.portfolio.positions.keys():
+            list_to_buy.append(stock)
+        '''
+        '''
+        close = history(1, '1d', 'close', [stock],df = False)[stock][0]
+        # MA60上才考虑买
+        ma60 = count_ma(stock, 60, 0)
+        if close < ma60:
+            continue
+        '''
+        # 多头排列——满仓买入
+        if is_highest_point(data,stock,0):
+            # 均线纠缠时，不进行买入操作
+            if is_struggle(count_ma(stock,10,0),count_ma(stock,20,0),count_ma(stock,30,0)):
+                continue
+            else:
+                list_to_buy.append(stock)
+                #order_target_value(stock,g.cash)
+        
+        # 空头排列后金叉——满仓买入 10, 20 金叉
+        if is_crossUP(data,stock,10, 20):
+                list_to_buy.append(stock)
+    return list_to_buy
+   
 # 已不再具有持有优势的股票
 # 输入：context(见API)；stock_list_now为list类型，表示初始持有股, stock_list_buy为list类型，表示可以买入的股票
 # 输出：应清仓的股票 list
-def get_clear_stock(context, stock_list_now, stock_list_buy):
+def get_clear_stock(context, stock_list_buy):
     # 
 
     stock_hold = []
     year = context.current_dt.year
+    stock_list_now = context.portfolio.positions.keys()
     for i in stock_list_now:
         q_PE_G = query(valuation.capitalization, income.basic_eps, cash_flow.pubDate
                  ).filter(valuation.code == i)
@@ -361,33 +459,60 @@ def get_clear_stock(context, stock_list_now, stock_list_buy):
     for i in range(len_df):
         if df_sort_PEG.ix[i,0] > 1.2:
             list_to_sell.append(df_sort_PEG.index[i])
-            log.info("code=%s PEG>1.2", i)
+            #log.info("code=%s PEG>1.2", i)
             
     return list_to_sell
+# 获得均线卖出信号
+# 输入：context（见API文档）
+# 输出：list_to_sell为list类型，表示待卖出的股票
+def stocks_djx_to_sell(context, data):
+    list_to_sell = []
+    list_hold = context.portfolio.positions.keys()
+    if len(list_hold) == 0:
+        return list_to_sell
     
-# 获得买入的list_to_buy
-# 输入list_can_buy 为list，可以买的队列
-# 输出list_to_buy 为list，买入的队列
-def pick_buy_list(context, list_can_buy):
-    list_to_buy = []
-    buy_num = g.num_stocks - len(context.portfolio.positions.keys())
-    if buy_num <= 0:
-        return list_to_buy
-    # 得到一个dataframe：index为股票代码，data为相应的PEG值
-    for i in list_can_buy:
-        if i not in context.portfolio.positions.keys():
-            list_to_buy.append(i)
-    return list_to_buy
-
+    for i in list_hold:
+        '''
+        close = history(1, '1d', 'close', [i],df = False)[i][0]
+        # 跌到MA60卖
+        ma60 = count_ma(i, 60, 0)
+        if close < ma60:
+            list_to_sell.append(i)
+            continue
+        '''
+        # 均线纠缠时，不进行操作
+        if is_struggle(count_ma(i,10,0),count_ma(i,20,0),count_ma(i,30,0)):
+            continue
+        # 空头排列——清仓卖出
+        if is_lowest_point(data,i,0):
+            list_to_sell.append(i)
+            continue
+        # 多头排列后死叉——清仓卖出 5 叉 10
+        if is_crossDOWN(data,i,5,10):
+            list_to_sell.append(i)
+            continue
+        '''
+        if context.portfolio.positions[i].avg_cost *0.95 >= data[i].close:
+            #亏损 5% 卖出
+            list_to_sell.append(i)
+        if context.portfolio.positions[i].avg_cost *1.15 <= data[i].close:
+            #赚 10% 卖出
+            list_to_sell.append(i)
+        '''
+    return list_to_sell
 
 #8
 # 获得卖出信号
 # 输入：context（见API文档）, list_to_buy为list类型，代表待买入的股票
 # 输出：list_to_sell为list类型，表示待卖出的股票
-def stocks_to_sell(context, list_to_buy):
+def stocks_to_sell(context, data, list_to_buy):
     # 对于不需要持仓的股票，全仓卖出
-    list_to_sell = get_clear_stock(context, context.portfolio.positions.keys(), list_to_buy)
-
+    list_to_sell = get_clear_stock(context, list_to_buy)
+    list_to_sell2 = stocks_djx_to_sell(context, data)
+    for i in list_to_sell2:
+        if i not in list_to_sell:
+            list_to_sell.append(i)
+    #log.debug(list_to_sell) 
     return list_to_sell
 
 # 平仓，卖出指定持仓
@@ -401,6 +526,21 @@ def close_position(position):
             # 只要有成交，无论全部成交还是部分成交，则统计盈亏
             g.trade_stat.watch(security, order.filled, position.avg_cost, position.price)
     return False
+    
+    
+# 自定义下单
+# 根据Joinquant文档，当前报单函数都是阻塞执行，报单函数（如order_target_value）返回即表示报单完成
+# 报单成功返回报单（不代表一定会成交），否则返回None
+def order_target_value_(security, value):
+    if value == 0:
+        log.debug("Selling out %s" % (security))
+    else:
+        log.debug("Order %s to value %f" % (security, value))
+        
+    # 如果股票停牌，创建报单会失败，order_target_value 返回None
+    # 如果股票涨跌停，创建报单会成功，order_target_value 返回Order，但是报单会取消
+    # 部成部撤的报单，聚宽状态是已撤，此时成交量>0，可通过成交量判断是否有成交
+    return order_target_value(security, value)
     
 #9
 # 执行卖出操作
