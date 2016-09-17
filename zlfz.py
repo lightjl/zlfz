@@ -23,11 +23,21 @@ def initialize(context):
 #1 
 #设置策略参数
 def set_params():
-    g.num_stocks = 5                         # 每次调仓选取的最大股票数量
-    g.stocks=get_index_stocks('000002.XSHG') # 设置上市A股为初始股票池 000002.XSHG
-    #g.stocks=get_index_stocks('000300.XSHG')# 设置上市A股为初始股票池 000300.XSHG
-    g.per = 0.1                              # EPS增长率不低于0.25
-    g.flag_stat = True                       # 默认不开启统计
+    g.num_stocks = 5                             # 每次调仓选取的最大股票数量
+    #g.stocks=get_all_securities(['stock'])      # 设置上市A股为初始股票池 000002.XSHG
+    g.stocks=get_index_stocks('000300.XSHG')     # 设置沪深300为初始股票池 000300.XSHG
+    
+    g.stocks=get_index_stocks('399630.XSHE')     # 设置1000成长为初始股票池 399630.XSHE
+    stocks_cz=get_index_stocks('000057.XSHG')    # 设置全指成长为初始股票池 000057.XSHG
+    for i in stocks_cz:
+        if i not in g.stocks:
+            g.stocks.append(i)
+    # log.debug(g.stocks)
+    
+    
+    g.per = 0.05                                 # EPS增长率不低于0.25
+    g.flag_stat = True                           # 默认不开启统计
+    g.trade_skill = False                        # 不开启交易策略
 
 #2
 #设置中间变量
@@ -51,7 +61,7 @@ def before_trading_start(context):
     # 设置可行股票池
     g.feasible_stocks = set_feasible_stocks(g.stocks,context)
     g.feasible_stocks = stocks_can_buy(context)
-    
+    log.debug(g.feasible_stocks)
     
 #4
 # 设置可行股票池：过滤掉当日停牌的股票
@@ -179,12 +189,12 @@ def get_growth_stock(context, stock_list):
     # 经营活动现金流入(元),经营活动现金流出(元)
     # 净利润同比增长率 ==> 每股现金流
     # 处理过去3年的数据
-    # 净利润同比增长率 inc_operation_profit_year_on_year 连续3年>= 25
-    # 动态市盈率 <= 40
+    # 净利润同比增长率 inc_operation_profit_year_on_year 连续3年>= 10
+    # 动态市盈率 <= 50
     # 资产负债率 < 0.5
     # 每股现金流 > EPS(去年)
     # 相对强度 xdqd12 >= xdqd1 >=0	
-    pe_ration_max = 40
+    pe_ration_max = 50
     
     year = context.current_dt.year
     month = context.current_dt.month
@@ -368,34 +378,99 @@ def pick_buy_list(context, data, list_can_buy):
     if buy_num <= 0:
         return list_to_buy
     # 得到一个dataframe：index为股票代码，data为相应的PEG值
-    for stock in list_can_buy:
+    ad_num = 0;
+    if g.trade_skill:
+        for stock in list_can_buy:
+            if stock in context.portfolio.positions.keys():
+                continue
+            '''
+            if stock not in context.portfolio.positions.keys():
+                list_to_buy.append(stock)
+            '''
+            close = history(1, '1d', 'close', [stock],df = False)[stock][0]
+            # MA60上才考虑买
+            ma60 = count_ma(stock, 60, 0)
+            ma20 = count_ma(stock, 20, 0)
+            if close < ma60:
+                continue
+            # 多头排列——满仓买入
+            if is_highest_point(data,stock,0):
+                # 均线纠缠时，不进行买入操作
+                if is_struggle(count_ma(stock,10,0),count_ma(stock,20,0),count_ma(stock,30,0)):
+                    continue
+                else:
+                    if close < ma20:
+                        list_to_buy.append(stock)
+                        ad_num += 1
+                        if ad_num >= buy_num:
+                            break
+                        continue
+            '''
+            # 空头排列后金叉——满仓买入 10, 20 金叉
+            if is_crossUP(data,stock,10, 20):
+                    list_to_buy.append(stock)
+                    ad_num += 1
+                    if ad_num >= buy_num:
+                        break
+            '''
+    else:
+        for stock in list_can_buy:
+            if stock in context.portfolio.positions.keys():
+                continue
+            list_to_buy.append(stock)
+            ad_num += 1
+            if ad_num >= buy_num:
+                break
+            
+    return list_to_buy
+'''  
+def stocks_can_buy(data, context):
+    list_can_buy = []
+    # current_data = get_current_data()
+    # current_data[stock].close:
+    for stock in g.stock:
+        #log.debug('%s, 5day before ma5= %.2f' ,stock, count_ma(stock, 5, 5))
         if stock in context.portfolio.positions.keys():
             continue
-        '''
-        if stock not in context.portfolio.positions.keys():
-            list_to_buy.append(stock)
-        '''
-        '''
+        
         close = history(1, '1d', 'close', [stock],df = False)[stock][0]
         # MA60上才考虑买
         ma60 = count_ma(stock, 60, 0)
+        ma20 = count_ma(stock, 20, 0)
         if close < ma60:
             continue
-        '''
         # 多头排列——满仓买入
-        if is_highest_point(data,stock,0):
-            # 均线纠缠时，不进行买入操作
-            if is_struggle(count_ma(stock,10,0),count_ma(stock,20,0),count_ma(stock,30,0)):
-                continue
-            else:
-                list_to_buy.append(stock)
+        if is_highest_point(data,stock,-1):
+            if close < ma20:
+                #log.debug('%s, %.2f, MA20=%.2f', stock, close, ma20)
+                list_can_buy.append(stock)
                 #order_target_value(stock,g.cash)
         
-        # 空头排列后金叉——满仓买入 10, 20 金叉
-        if is_crossUP(data,stock,10, 20):
-                list_to_buy.append(stock)
-    return list_to_buy
-   
+    return list_can_buy
+    
+# 获得买入的list_to_buy
+# 输入list_can_buy 为list，可以买的队列
+# 输出list_to_buy 为list，买入的队列
+def pick_buy_list(context, data, list_can_buy, list_to_sell):
+    list_to_buy = []
+    # 要买数 = 可持数 - 持仓数 + 要卖数
+    buy_num = g.num_stocks - len(context.portfolio.positions.keys()) + len(list_to_sell)
+    if buy_num <= 0:
+        return list_to_buy
+    # 得到一个dataframe：index为股票代码，data为相应的PEG值
+    # 处理-------------------------------------------------
+    current_data = get_current_data()
+    ad_num = 0;
+    for i in list_can_buy:
+        if i not in context.portfolio.positions.keys():
+            # 没有持仓这股票, 假如这股票此时红盘就买入
+            # if data[i].close > current_data[i].day_open:
+            list_to_buy.append(i)
+            ad_num = ad_num + 1
+        if ad_num >= buy_num:
+            break
+    return list_to_buy 
+'''    
 # 已不再具有持有优势的股票
 # 输入：context(见API)；stock_list_now为list类型，表示初始持有股, stock_list_buy为list类型，表示可以买入的股票
 # 输出：应清仓的股票 list
@@ -472,25 +547,21 @@ def stocks_djx_to_sell(context, data):
         return list_to_sell
     
     for i in list_hold:
-        '''
         close = history(1, '1d', 'close', [i],df = False)[i][0]
         # 跌到MA60卖
         ma60 = count_ma(i, 60, 0)
         if close < ma60:
             list_to_sell.append(i)
             continue
-        '''
         # 均线纠缠时，不进行操作
-        if is_struggle(count_ma(i,10,0),count_ma(i,20,0),count_ma(i,30,0)):
+        if is_struggle(count_ma(i,5,1),count_ma(i,20,1),count_ma(i,60,1)):
             continue
         # 空头排列——清仓卖出
-        if is_lowest_point(data,i,0):
+        if is_lowest_point(data,i,-1):
             list_to_sell.append(i)
-            continue
-        # 多头排列后死叉——清仓卖出 5 叉 10
-        if is_crossDOWN(data,i,5,10):
+        # 多头排列后死叉——清仓卖出 20 叉 60
+        elif is_crossDOWN(data,i,20,60):
             list_to_sell.append(i)
-            continue
         '''
         if context.portfolio.positions[i].avg_cost *0.95 >= data[i].close:
             #亏损 5% 卖出
@@ -507,11 +578,13 @@ def stocks_djx_to_sell(context, data):
 # 输出：list_to_sell为list类型，表示待卖出的股票
 def stocks_to_sell(context, data, list_to_buy):
     # 对于不需要持仓的股票，全仓卖出
+    list_to_sell = []
     list_to_sell = get_clear_stock(context, list_to_buy)
-    list_to_sell2 = stocks_djx_to_sell(context, data)
-    for i in list_to_sell2:
-        if i not in list_to_sell:
-            list_to_sell.append(i)
+    if g.trade_skill:
+        list_to_sell2 = stocks_djx_to_sell(context, data)
+        for i in list_to_sell2:
+            if i not in list_to_sell:
+                list_to_sell.append(i)
     #log.debug(list_to_sell) 
     return list_to_sell
 
