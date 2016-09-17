@@ -24,7 +24,8 @@ def initialize(context):
 #设置策略参数
 def set_params():
     g.num_stocks = 5                             # 每次调仓选取的最大股票数量
-    #g.stocks=get_all_securities(['stock'])      # 设置上市A股为初始股票池 000002.XSHG
+    g.stocks=get_all_securities(['stock']).index # 设置上市A股为初始股票池 000002.XSHG
+    '''
     g.stocks=get_index_stocks('000300.XSHG')     # 设置沪深300为初始股票池 000300.XSHG
     
     g.stocks=get_index_stocks('399630.XSHE')     # 设置1000成长为初始股票池 399630.XSHE
@@ -32,7 +33,9 @@ def set_params():
     for i in stocks_cz:
         if i not in g.stocks:
             g.stocks.append(i)
-    # log.debug(g.stocks)    
+    # log.debug(g.stocks)  
+    '''   
+        
     g.per = 0.05                                 # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
     g.trade_skill = True                         # 开启交易策略
@@ -92,8 +95,8 @@ def before_trading_start(context):
 def set_feasible_stocks(initial_stocks,context):
     # 判断初始股票池的股票是否停牌，返回list
     unsuspened_stocks =filter_paused_stock(initial_stocks)    
-    unsuspened_stocks = filter_st_stock(unsuspened_stocks)
-    return unsuspened_stocks
+    unst_stocks = filter_st_stock(unsuspened_stocks)
+    return unst_stocks
 
 # 过滤停牌股票
 def filter_paused_stock(stock_list):
@@ -712,7 +715,7 @@ def stocks_to_sell(context, data, list_to_buy):
 # 平仓，卖出指定持仓
 # 平仓成功并全部成交，返回True
 # 报单失败或者报单成功但被取消（此时成交量等于0），或者报单非全部成交，返回False
-def close_position(position):
+def close_position(context, position):
     security = position.security
     order = order_target_value_(security, 0) # 可能会因停牌失败
     if order != None:
@@ -747,7 +750,7 @@ def order_target_value_(security, value):
 def sell_operation(context, list_to_sell):
     for stock_sell in list_to_sell:
         position = context.portfolio.positions[stock_sell]
-        close_position(position)
+        close_position(context, position)
 
 
 #10
