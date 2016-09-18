@@ -131,10 +131,10 @@ def set_slip_fee(context):
 '''
 # 每天回测时做的事情
 def handle_data(context,data):
-    # 待卖出的股票，list类型
-    list_to_sell = stocks_to_sell(context, data, g.security)
     # 需买入的股票
     list_to_buy = pick_buy_list(context, data, g.security)
+    # 待卖出的股票，list类型
+    list_to_sell = stocks_to_sell(context, data, list_to_buy)
     # 卖出操作
     sell_operation(context,list_to_sell)
     # 买入操作
