@@ -317,6 +317,8 @@ def stocks_can_buy(context):
     for i in range(len(df_sort_PEG.index)):
         if df_sort_PEG.ix[i,0] < 0.75:
             list_can_buy.append(df_sort_PEG.index[i])
+        else:
+            break
     return list_can_buy
     
     
