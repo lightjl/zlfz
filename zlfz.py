@@ -28,6 +28,7 @@ def set_params():
     # log.debug(g.stocks)
     g.per = 0.1                                  # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
+    g.flag_pick = True                           # 不开启选股
     g.trade_skill = True                         # 不开启交易策略
 
 #2
@@ -51,8 +52,9 @@ def before_trading_start(context):
     set_slip_fee(context)                 # 设置手续费与手续费
     # 设置可行股票池
     g.feasible_stocks = set_feasible_stocks(g.stocks,context)
-    g.feasible_stocks = stocks_can_buy(context)
-    log.debug(g.feasible_stocks)
+    if g.flag_pick:
+        g.feasible_stocks = stocks_can_buy(context)
+        log.debug(g.feasible_stocks)
     
 #4
 # 设置可行股票池：过滤掉当日停牌的股票
@@ -106,10 +108,10 @@ def set_slip_fee(context):
 '''
 # 每天回测时做的事情
 def handle_data(context,data):
-    # 待卖出的股票，list类型
-    list_to_sell = stocks_to_sell(context, data, g.feasible_stocks)
-    # 需买入的股票
+    # 需买入的股票 ，必须调整顺序（第二次使用交易体系筛选）,挑出5个
     list_to_buy = pick_buy_list(context, data, g.feasible_stocks)
+    # 待卖出的股票，list类型
+    list_to_sell = stocks_to_sell(context, data, list_to_buy)
     # 卖出操作
     sell_operation(context,list_to_sell)
     # 买入操作
@@ -361,9 +363,7 @@ def is_crossDOWN(data,stock,short,long):
 # 输出list_to_buy 为list，买入的队列
 def pick_buy_list(context, data, list_can_buy):
     list_to_buy = []
-    buy_num = g.num_stocks - len(context.portfolio.positions.keys())
-    if buy_num <= 0:
-        return list_to_buy
+    buy_num = g.num_stocks
     # 得到一个dataframe：index为股票代码，data为相应的PEG值
     ad_num = 0
     if g.trade_skill:
@@ -387,12 +387,20 @@ def pick_buy_list(context, data, list_can_buy):
                 if is_struggle(count_ma(stock,10,0),count_ma(stock,20,0),count_ma(stock,30,0)):
                     continue
                 else:
+                    log.debug('%s 多头排列', stock)
                     list_to_buy.append(stock)
+                    ad_num += 1
                     #order_target_value(stock,g.cash)
-            
+                    if ad_num >= buy_num:
+                        break
+
             # 空头排列后金叉——满仓买入 10, 20 金叉
             if is_crossUP(data,stock,10, 20):
+                    log.debug('%s 空头排列后金叉', stock)
                     list_to_buy.append(stock)
+                    ad_num += 1
+                    if ad_num >= buy_num:
+                        break
     else:
         for stock in list_can_buy:
             if stock in context.portfolio.positions.keys():
@@ -434,7 +442,7 @@ def get_clear_stock(context, stock_list_buy):
     stock_can_buy = stock_hold      # +stock_list_buy
     for i in stock_list_buy:
         stock_can_buy.append(i)
-    #log.info(stock_can_buy)
+    log.debug("hold", stock_can_buy)
     #全都不值的保留
     if stock_can_buy is None:
         return stock_list_now
@@ -492,10 +500,12 @@ def stocks_djx_to_sell(context, data):
             continue
         # 空头排列——清仓卖出
         if is_lowest_point(data,i,0):
+            log.debug('%s 空头排列', i)
             list_to_sell.append(i)
             continue
         # 多头排列后死叉——清仓卖出 5 叉 10
         if is_crossDOWN(data,i,5,10):
+            log.debug('%s 多头排列后死叉5 叉 10', i)
             list_to_sell.append(i)
             continue
         '''
@@ -514,7 +524,9 @@ def stocks_djx_to_sell(context, data):
 # 输出：list_to_sell为list类型，表示待卖出的股票
 def stocks_to_sell(context, data, list_to_buy):
     # 对于不需要持仓的股票，全仓卖出
-    list_to_sell = get_clear_stock(context, list_to_buy)
+    list_to_sell = []
+    if g.flag_pick:
+        list_to_sell = get_clear_stock(context, list_to_buy)
     if g.trade_skill:
         list_to_sell2 = stocks_djx_to_sell(context, data)
         for i in list_to_sell2:
