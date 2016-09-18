@@ -287,7 +287,7 @@ def stocks_can_buy(context):
     # 将存储有序股票代码index转换成list并取前g.num_stocks个为待买入的股票，返回list
     # nummax = min(len(df_PEG.index), g.num_stocks-len(context.portfolio.positions.keys()))
         
-    for i in range(len(df_sort_PEG.index):
+    for i in range(len(df_sort_PEG.index)):
         if df_sort_PEG.ix[i,0] < 0.75:
             list_can_buy.append(df_sort_PEG.index[i])
         else:
@@ -393,14 +393,14 @@ def pick_buy_list(context, data, list_can_buy):
             # 空头排列后金叉——满仓买入 10, 20 金叉
             if is_crossUP(data,stock,10, 20):
                     list_to_buy.append(stock)
-     else:
-         for stock in list_can_buy:
-             if stock in context.portfolio.positions.keys():
-                 continue
-             list_to_buy.append(stock)
-             ad_num += 1
-             if ad_num >= buy_num:
-                 break
+    else:
+        for stock in list_can_buy:
+            if stock in context.portfolio.positions.keys():
+                continue
+            list_to_buy.append(stock)
+            ad_num += 1
+            if ad_num >= buy_num:
+                break
     return list_to_buy
    
 # 已不再具有持有优势的股票
