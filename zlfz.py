@@ -25,16 +25,7 @@ def initialize(context):
 def set_params():
     g.num_stocks = 5                             # 每次调仓选取的最大股票数量
     g.stocks=get_all_securities(['stock']).index # 设置上市A股为初始股票池 000002.XSHG
-    '''
-    g.stocks=get_index_stocks('000300.XSHG')     # 设置沪深300为初始股票池 000300.XSHG
-    
-    g.stocks=get_index_stocks('399630.XSHE')     # 设置1000成长为初始股票池 399630.XSHE
-    stocks_cz=get_index_stocks('000057.XSHG')    # 设置全指成长为初始股票池 000057.XSHG
-    for i in stocks_cz:
-        if i not in g.stocks:
-            g.stocks.append(i)
-    # log.debug(g.stocks)  
-    '''   
+
         
     g.per = 0.05                                 # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
@@ -155,17 +146,17 @@ def handle_data(context,data):
 # 输出：df_PEG为dataframe: index为股票代码，data为相应的PEG值
 def get_PEG(context, stock_list): 
     # 查询股票池里股票的市盈率，收益增长率
-    q_PE_G = query(valuation.code, valuation.pe_ratio, indicator.inc_operation_profit_year_on_year
+    q_PE_G = query(valuation.code, valuation.pe_ratio_lyr, indicator.inc_operation_profit_year_on_year
                  ).filter(valuation.code.in_(stock_list)) 
     # 得到一个dataframe：包含股票代码、市盈率PE、收益增长率G
     # 默认date = context.current_dt的前一天,使用默认值，避免未来函数，不建议修改
     df_PE_G = get_fundamentals(q_PE_G)
     # 筛选出成长股：删除市盈率或收益增长率为负值的股票
-    df_Growth_PE_G = df_PE_G[(df_PE_G.pe_ratio >0)&(df_PE_G.inc_operation_profit_year_on_year >0)]
+    df_Growth_PE_G = df_PE_G[(df_PE_G.pe_ratio_lyr >0)&(df_PE_G.inc_operation_profit_year_on_year >0)]
     # 去除PE或G值为非数字的股票所在行
     df_Growth_PE_G.dropna()
     # 得到一个Series：存放股票的市盈率TTM，即PE值
-    Series_PE = df_Growth_PE_G.ix[:,'pe_ratio']
+    Series_PE = df_Growth_PE_G.ix[:,'pe_ratio_lyr']
     # 得到一个Series：存放股票的收益增长率，即G值
     Series_G = df_Growth_PE_G.ix[:,'inc_operation_profit_year_on_year']
     # 得到一个Series：存放股票的PEG值
@@ -215,11 +206,11 @@ def get_growth_stock(context, stock_list):
     # 净利润同比增长率 ==> 每股现金流
     # 处理过去3年的数据
     # 净利润同比增长率 inc_operation_profit_year_on_year 连续3年>= 10
-    # 动态市盈率 <= 50
+    # 动态市盈率 <= 40
     # 资产负债率 < 0.5
     # 每股现金流 > EPS(去年)
     # 相对强度 xdqd12 >= xdqd1 >=0	
-    pe_ration_max = 50
+    pe_ration_max = 40
     
     year = context.current_dt.year
     month = context.current_dt.month
@@ -247,12 +238,12 @@ def get_growth_stock(context, stock_list):
     
     for i in list_stock:
         # 流通市值>500跳过
-        #if yearP1.loc[0,'circulating_market_cap'] > 500:
+        #if .loc[0,'circulating_market_cap'] > 500:
         #    continue
         #log.info(yearP1)
-        startth = 0
+        startth = 1
         if context.current_dt.strftime("%Y-%m-%d") < yearP1.loc[0,'pubDate']:
-            start_yearth = 1
+            start_yearth = 0
         # 回测当天，前4年的已出的年报有无空的    
         flag_empty = False
         for j in range(startth, 4+startth):
@@ -270,7 +261,7 @@ def get_growth_stock(context, stock_list):
         for j in range(4):
             cap[j] = yearP[j+startth][yearP[j+startth].code==i]['capitalization'].values[0]
         cap_now = df_now[df_now.code==i]['capitalization'].values[0]
-        
+        df_lastyear = yearP[3+startth][yearP[3+startth].code==i]
         flag_cz = True        
         for j in range(3):      # 2011 2012 2013 2014 or 2012 ... 今年2016
             if (1+g.per)*eps[j]*cap[j] > eps[j+1]*cap[j+1]:
@@ -280,28 +271,24 @@ def get_growth_stock(context, stock_list):
         # todo
         if flag_cz:
             #log.info("code=%s, market_cap=%d", i, yearP1.loc[0, 'circulating_market_cap'])
-            #log.debug(yearP1)
-            #log.debug(yearP2) 
-            #log.debug(yearP3)
-            #log.debug(yearP4)
+            gg_price = get_price(i, start_date=last_year, end_date=last_month+timedelta(1), frequency='daily', fields='close')
             # 动态市盈率 负债合计(元)/负债和股东权益合计
             
             #满分 1+1+1
             scoreOfStock = 0
             # pe_ratio 动态市盈率  负债合计(元)/负债和股东权益合计= 资产负债率 < 0.5
-            zcfzl = yearP1.loc[0, 'total_liability']/yearP1.loc[0, 'total_sheet_owner_equities']
-            if yearP1.loc[0, 'pe_ratio'] <= pe_ration_max:
+            zcfzl = df_lastyear['total_liability'].values[0]/df_lastyear['total_sheet_owner_equities'].values[0]
+            if df_lastyear['pe_ratio'].values[0] <= pe_ration_max:
                 if zcfzl<0.5:
                     scoreOfStock = scoreOfStock + 1
                 #每股现金流 > EPS(去年)
-                if yearP1.loc[0, 'subtotal_operate_cash_inflow'] - yearP1.loc[0, 'subtotal_operate_cash_outflow'] > yearP1.loc[0, 'basic_eps']*yearP1.loc[0, 'capitalization']:
+                if df_lastyear['subtotal_operate_cash_inflow'].values[0] - df_lastyear['subtotal_operate_cash_outflow'].values[0] > df_lastyear['basic_eps'].values[0]*df_lastyear['capitalization'].values[0]*10000:
                     scoreOfStock = scoreOfStock + 1
                 # 相对强度
-                h = history(260, security_list=['000001.XSHG', i])
-                dpqd1 = (h['000001.XSHG'][-1]-h['000001.XSHG'][-22])/h['000001.XSHG'][-22]
-                ggqd1 = (h[i][-1]-h[i][-22])/h[i][-22]
-                dpqd12 = (h['000001.XSHG'][-1]-h['000001.XSHG'][-260])/h['000001.XSHG'][-260]
-                ggqd12 = (h[i][-1]-h[i][-260])/h[i][-260]
+                dpqd1 = (dp_price['close'][last_month]-dp_price['close'][last_2month])/dp_price['close'][last_2month]
+                ggqd1 = (gg_price['close'][last_month]-gg_price['close'][last_2month])/gg_price['close'][last_2month]
+                dpqd12 = (dp_price['close'][last_month]-dp_price['close'][last_year])/dp_price['close'][last_year]
+                ggqd12 = (gg_price['close'][last_month]-gg_price['close'][last_year])/gg_price['close'][last_year]
                 xdqd12 = (ggqd12 - dpqd12)/ abs(dpqd12)
                 xdqd1 = (ggqd1 - dpqd1)/ abs(dpqd1)
                 if xdqd12 >= xdqd1 and xdqd1 >= 0:
@@ -310,8 +297,8 @@ def get_growth_stock(context, stock_list):
                     buy_list_stocks.append(i)
             #log.info(yearP2)
             #log.info(yearP3)
-            #log.info("code=%s, zcfzl=%.2f, sylyc=%f, yearL1 = %d, P1=%f, P2=%f, P3=%f", i, zcfzl, yearP1.loc[0, 'pe_ratio'], \
-            #                yearL1, yearP1.loc[0, 'eps'], yearP2.loc[0, 'eps'], yearP3.loc[0, 'eps'])
+            log.info("code=%s, score=%d zcfzl=%.2f, eps=%f, yearL1 = %d, mgxjl=%.2f", i, scoreOfStock, zcfzl, eps[3], \
+            year-5+startth, (df_lastyear['subtotal_operate_cash_inflow'].values[0] - df_lastyear['subtotal_operate_cash_outflow'].values[0])/df_lastyear['capitalization'].values[0]/10000)
     return buy_list_stocks
     
 #7
@@ -325,9 +312,9 @@ def stocks_can_buy(context):
     # 将股票按PEG升序排列，返回daraframe类型
     df_sort_PEG = df_PEG.sort(columns=[0], ascending=[1])
     # 将存储有序股票代码index转换成list并取前g.num_stocks个为待买入的股票，返回list
-    nummax = min(len(df_PEG.index), g.num_stocks-len(context.portfolio.positions.keys()))
+    # nummax = min(len(df_PEG.index), g.num_stocks-len(context.portfolio.positions.keys()))
         
-    for i in range(nummax):
+    for i in range(len(df_sort_PEG.index)):
         if df_sort_PEG.ix[i,0] < 0.75:
             list_can_buy.append(df_sort_PEG.index[i])
     return list_can_buy
