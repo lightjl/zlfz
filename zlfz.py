@@ -123,17 +123,17 @@ def handle_data(context,data):
 # 输出：df_PEG为dataframe: index为股票代码，data为相应的PEG值
 def get_PEG(context, stock_list): 
     # 查询股票池里股票的市盈率，收益增长率
-    q_PE_G = query(valuation.code, valuation.pe_ratio, indicator.inc_operation_profit_year_on_year
+    q_PE_G = query(valuation.code, valuation.pe_ratio_lyr, indicator.inc_operation_profit_year_on_year
                  ).filter(valuation.code.in_(stock_list)) 
     # 得到一个dataframe：包含股票代码、市盈率PE、收益增长率G
     # 默认date = context.current_dt的前一天,使用默认值，避免未来函数，不建议修改
     df_PE_G = get_fundamentals(q_PE_G)
     # 筛选出成长股：删除市盈率或收益增长率为负值的股票
-    df_Growth_PE_G = df_PE_G[(df_PE_G.pe_ratio >0)&(df_PE_G.inc_operation_profit_year_on_year >0)]
+    df_Growth_PE_G = df_PE_G[(df_PE_G.pe_ratio_lyr >0)&(df_PE_G.inc_operation_profit_year_on_year >0)]
     # 去除PE或G值为非数字的股票所在行
     df_Growth_PE_G.dropna()
     # 得到一个Series：存放股票的市盈率TTM，即PE值
-    Series_PE = df_Growth_PE_G.ix[:,'pe_ratio']
+    Series_PE = df_Growth_PE_G.ix[:,'pe_ratio_lyr']
     # 得到一个Series：存放股票的收益增长率，即G值
     Series_G = df_Growth_PE_G.ix[:,'inc_operation_profit_year_on_year']
     # 得到一个Series：存放股票的PEG值
@@ -218,9 +218,10 @@ def get_growth_stock(context, stock_list):
         #if .loc[0,'circulating_market_cap'] > 500:
         #    continue
         #log.info(yearP1)
-        startth = 0
+        startth = 1
+        # 2016-08-29 2016-04-04
         if context.current_dt.strftime("%Y-%m-%d") < yearP1.loc[0,'pubDate']:
-            start_yearth = 1
+            start_yearth = 0
         # 回测当天，前4年的已出的年报有无空的    
         flag_empty = False
         for j in range(startth, 4+startth):
@@ -266,7 +267,6 @@ def get_growth_stock(context, stock_list):
                 if df_lastyear['subtotal_operate_cash_inflow'].values[0] - df_lastyear['subtotal_operate_cash_outflow'].values[0] > df_lastyear['basic_eps'].values[0]*df_lastyear['capitalization'].values[0]*10000:
                     scoreOfStock = scoreOfStock + 1
                 # 相对强度
-                h = history(260, security_list=['000001.XSHG', i])
                 dpqd1 = (dp_price['close'][last_month]-dp_price['close'][last_2month])/dp_price['close'][last_2month]
                 ggqd1 = (gg_price['close'][last_month]-gg_price['close'][last_2month])/gg_price['close'][last_2month]
                 dpqd12 = (dp_price['close'][last_month]-dp_price['close'][last_year])/dp_price['close'][last_year]
@@ -279,9 +279,9 @@ def get_growth_stock(context, stock_list):
                     buy_list_stocks.append(i)
             #log.info(yearP2)
             #log.info(yearP3)
-            log.info("code=%s, zcfzl=%.2f, sylyc=%f, yearL1 = %d, mgxjl=%.2f", i, zcfzl, yearP1[yearP1.code==i]['pe_ratio'].values[0], \
+            log.info("code=%s, score=%d zcfzl=%.2f, eps=%f, yearL1 = %d, mgxjl=%.2f", i, scoreOfStock, zcfzl, eps[3], \
                 year-5+startth, (df_lastyear['subtotal_operate_cash_inflow'].values[0] - df_lastyear['subtotal_operate_cash_outflow'].values[0])/df_lastyear['capitalization'].values[0]/10000)
-                
+    #log.debug(buy_list_stocks)            
     return buy_list_stocks
     
 #7
@@ -295,11 +295,13 @@ def stocks_can_buy(context):
     # 将股票按PEG升序排列，返回daraframe类型
     df_sort_PEG = df_PEG.sort(columns=[0], ascending=[1])
     # 将存储有序股票代码index转换成list并取前g.num_stocks个为待买入的股票，返回list
-    nummax = min(len(df_PEG.index), g.num_stocks-len(context.portfolio.positions.keys()))
+    #nummax = min(len(df_PEG.index), g.num_stocks-len(context.portfolio.positions.keys()))
         
-    for i in range(nummax):
+    for i in range(len(df_sort_PEG.index)):
         if df_sort_PEG.ix[i,0] < 0.75:
             list_can_buy.append(df_sort_PEG.index[i])
+        else:
+            break
     return list_can_buy
     
     
