@@ -220,9 +220,11 @@ def get_growth_stock(context, stock_list):
         #log.info(yearP1)
         start_yearth = 1
         # 2016-08-29 2016-04-04
-        datanow = time.strptime(context.current_dt.strftime("%Y-%m-%d"), "%Y-%m-%d")
-        datapub = time.strptime(yearP1[yearP1.code==i]['pubDate'].values[0], "%Y-%m-%d")
-        if datanow < datapub:
+        # datanow = time.strptime(, "%Y-%m-%d")
+        # datapub = time.strptime(, "%Y-%m-%d")
+        if yearP1[yearP1.code==i].empty:
+            start_yearth = 0
+        elif context.current_dt.strftime("%Y-%m-%d") < yearP1[yearP1.code==i]['pubDate'].values[0]:
             start_yearth = 0
             #log.debug('未公布')
         #log.debug('%s %s 年报%s %d',i, datanow, datapub, year-1-start_yearth)
@@ -303,7 +305,7 @@ def stocks_can_buy(context):
     #nummax = min(len(df_PEG.index), g.num_stocks-len(context.portfolio.positions.keys()))
         
     for i in range(len(df_sort_PEG.index)):
-        if df_sort_PEG.ix[i,0] < 0.75:
+        if df_sort_PEG.ix[i,0] < 1:
             list_can_buy.append(df_sort_PEG.index[i])
         else:
             break
