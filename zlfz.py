@@ -30,7 +30,7 @@ def set_params():
     
     g.per = 0.1                                  # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
-    g.trade_skill = True                        s # 不开启交易策略
+    g.trade_skill = True                         # 不开启交易策略
 
 #2
 #设置中间变量
