@@ -25,22 +25,44 @@ def initialize(context):
 def set_params():
     g.num_stocks = 5                             # 每次调仓选取的最大股票数量
     g.stocks=get_all_securities(['stock']).index # 设置上市A股为初始股票池 000002.XSHG
-    # log.debug(g.stocks)
+
     
     
     g.per = 0.1                                  # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
     g.trade_skill = True                         # 不开启交易策略
+    # 设置移动均线天数
+    g.ma_length = 30
+    # 设置判断输赢的天数
+    g.after_days = 30
+    # 赢是几个sigma
+    g.win_times_sigma = 1
+    # 输是几个sigma
+    g.lose_times_sigma = 1
+    # 最小数据比例
+    g.least_percentage = 0.05
+    # 计量输赢时取区间宽度
+    g.band_width = 4
+    # 交易时止盈线
+    g.profit_times_sigma = 1
+    # 交易时止损线
+    g.loss_times_sigma = 1
 
-#2
-#设置中间变量
+# ---代码块2.设置全局变量
 def set_variables():
-    return None
+    # 股票的卖出判定
+    g.sell_conditions = {}  
+    # 记录输赢统计
+    g.stock_stats = {}
+    # 记录最佳买入区间
+    g.stock_best_ranges = {}
 
 #3
 #设置回测条件
 def set_backtest():
     set_option('use_real_price',True)        # 用真实价格交易
+    # 设置回测基准
+    set_benchmark('000300.XSHG')
     log.set_level('order','debug')           # 设置报错等级
 
 '''
@@ -53,9 +75,11 @@ def before_trading_start(context):
     set_slip_fee(context)                 # 设置手续费与手续费
     # 设置可行股票池
     g.feasible_stocks = set_feasible_stocks(g.stocks,context)
-    g.feasible_stocks = stocks_can_buy(context)
-    log.debug(g.feasible_stocks)
-    
+    g.security = stocks_can_buy(context)
+    log.debug(g.security)
+    initiate_statistics(context)
+    # 更新输赢统计， 没优化前不用更新，全部重算
+    # update_statistics(context)
 #4
 # 设置可行股票池：过滤掉当日停牌的股票
 # 输入：initial_stocks为list类型,表示初始股票池； context（见API）
@@ -63,8 +87,8 @@ def before_trading_start(context):
 def set_feasible_stocks(initial_stocks,context):
     # 判断初始股票池的股票是否停牌，返回list
     unsuspened_stocks =filter_paused_stock(initial_stocks)    
-    unsuspened_stocks = filter_st_stock(unsuspened_stocks)
-    return unsuspened_stocks
+    unst_stocks = filter_st_stock(unsuspened_stocks)
+    return unst_stocks
 
 # 过滤停牌股票
 def filter_paused_stock(stock_list):
@@ -109,7 +133,8 @@ def set_slip_fee(context):
 # 每天回测时做的事情
 def handle_data(context,data):
     # 需买入的股票
-    list_to_buy = pick_buy_list(context, data, g.feasible_stocks)
+
+    list_to_buy = pick_buy_list(context, data, g.security)
     # 待卖出的股票，list类型
     list_to_sell = stocks_to_sell(context, data, list_to_buy)
     # 卖出操作
@@ -183,7 +208,7 @@ def get_growth_stock(context, stock_list):
     # 净利润同比增长率 ==> 每股现金流
     # 处理过去3年的数据
     # 净利润同比增长率 inc_operation_profit_year_on_year 连续3年>= 10
-    # 动态市盈率 <= 50
+    # 动态市盈率 <= 40
     # 资产负债率 < 0.5
     # 每股现金流 > EPS(去年)
     # 相对强度 xdqd12 >= xdqd1 >=0	
@@ -219,7 +244,6 @@ def get_growth_stock(context, stock_list):
         #    continue
         #log.info(yearP1)
         startth = 1
-        # 2016-08-29 2016-04-04
         if context.current_dt.strftime("%Y-%m-%d") < yearP1.loc[0,'pubDate']:
             start_yearth = 0
         # 回测当天，前4年的已出的年报有无空的    
@@ -254,6 +278,7 @@ def get_growth_stock(context, stock_list):
             #log.debug('%i 0=%.2f 1=%.2f 2=%.2f 3=%.2f', startth, cap[0], cap[1], cap[2], cap[3])
             #log.info("code=%s, market_cap=%d", i, yearP1.loc[0, 'circulating_market_cap'])
 
+            gg_price = get_price(i, start_date=last_year, end_date=last_month+timedelta(1), frequency='daily', fields='close')
             # 动态市盈率 负债合计(元)/负债和股东权益合计
             
             #满分 1+1+1
@@ -280,8 +305,9 @@ def get_growth_stock(context, stock_list):
             #log.info(yearP2)
             #log.info(yearP3)
             log.info("code=%s, score=%d zcfzl=%.2f, eps=%f, yearL1 = %d, mgxjl=%.2f", i, scoreOfStock, zcfzl, eps[3], \
-                year-5+startth, (df_lastyear['subtotal_operate_cash_inflow'].values[0] - df_lastyear['subtotal_operate_cash_outflow'].values[0])/df_lastyear['capitalization'].values[0]/10000)
-    #log.debug(buy_list_stocks)            
+
+            year-5+startth, (df_lastyear['subtotal_operate_cash_inflow'].values[0] - df_lastyear['subtotal_operate_cash_outflow'].values[0])/df_lastyear['capitalization'].values[0]/10000)
+
     return buy_list_stocks
     
 #7
@@ -295,7 +321,8 @@ def stocks_can_buy(context):
     # 将股票按PEG升序排列，返回daraframe类型
     df_sort_PEG = df_PEG.sort(columns=[0], ascending=[1])
     # 将存储有序股票代码index转换成list并取前g.num_stocks个为待买入的股票，返回list
-    #nummax = min(len(df_PEG.index), g.num_stocks-len(context.portfolio.positions.keys()))
+
+    # nummax = min(len(df_PEG.index), g.num_stocks-len(context.portfolio.positions.keys()))
         
     for i in range(len(df_sort_PEG.index)):
         if df_sort_PEG.ix[i,0] < 0.75:
@@ -308,62 +335,195 @@ def stocks_can_buy(context):
  
 '''
 ================================================================================
-多均线策略
+均值回归策略
 ================================================================================
 '''
-# 判断均线纠缠
-def is_struggle(mavg1,mavg2,mavg3):
-    if abs((mavg1-mavg2)/mavg2)< 0.003\
-    or abs((mavg2-mavg3)/mavg3)< 0.002:
-        return True
-    return False
-    
-# 计算股票过去n个单位时间（一天）均值
-# n 天的MA， day_before天前
-def count_ma(stock,n, day_before):
-    #log.debug(history(n, '1d', 'close', [stock])[stock])
-    #log.debug(history(n, '1d', 'close', [stock],df = False)[stock].mean())
-    return history(n+day_before, '1d', 'close', [stock],df = False)[stock][0:n].mean()
+
+# --代码块4
+# 初始化输赢统计
+# 无输出
+# 更新全局变量一dict的DataFrame，key为股票，内容为偏差倍数和输赢的统计
+def initiate_statistics(context):
+    # 初始化输赢统计
+    for security in g.security:
+        '''
+        # 股票池动态改变，未确保正确只好浪费下时间
+        # 有机会再优化
+        if g.stock_stats.has_key(security):
+            continue
+        '''
+        # 上个日期
+        previous_date = context.previous_date
+        # 获取历史收盘价数据
+        prices = get_price(security, start_date='2006-01-01', end_date=previous_date, frequency='daily', fields=['close'], skip_paused = True)['close']
+        # 得到偏离倍数和输赢结果的记录
+        my_data = collect_data(prices, g.ma_length)
+        # 对上面取得的数据进行数量统计
+        statistics = compute_statistics(my_data)
+        # 将统计结果做成DF
+        my_df = pd.DataFrame(statistics, index=['value', 'win', 'even', 'lose'])
+        # 转置
+        g.stock_stats[security] = my_df.T
 
 
-# 判断多头排列 5 10 20 30
-def is_highest_point(data,stock,n):
-    if count_ma(stock,5,n) > count_ma(stock,10,n)\
-    and count_ma(stock,10,n) > count_ma(stock,20,n)\
-    and count_ma(stock,20,n) > count_ma(stock,30,n):
-        #log.debug('%s, ma5=%.2f, ma10=%.2f, ma20=%.2f, ma30=%.2f', stock, count_ma(stock,5,-n)\
-        #,count_ma(stock,10,-n),count_ma(stock,20,-n),count_ma(stock,30,-n))
-        return True
-    return False
 
-# 判断空头排列——空仓 5 10 20
-def is_lowest_point(data,stock,n):
-    if count_ma(stock,5,n) < count_ma(stock,10,n)\
-    and count_ma(stock,10,n) < count_ma(stock,20,n):
-        log.debug('%d, %s, ma5=%.2f, ma10=%.2f, ma20=%.2f',n, stock, count_ma(stock,5,n), count_ma(stock,10,n), count_ma(stock,20,n))
-        return True
-    return False
-    
-    
-# 判断10日线， 20日线空头排列后的金叉——买入
-def is_crossUP(data,stock,short,long):
-    if is_lowest_point(data,stock,1) and is_lowest_point(data,stock,2):
-        if count_ma(stock, short, 1) < count_ma(stock, long, 1)\
-        and count_ma(stock, short, 0) > count_ma(stock, long, 0):
-            return True
-    return False
+# ---代码块5. 
+# 收集输赢数据
+# 输入一list价格和位置i
+# 返回一list的pairs，是i天之后每一天的价格偏离倍数和之后的输赢结果。
+def collect_data(prices, i):
+    # 初始化记录
+    my_data = []
+    # 当i的位加后置天数没有超过数据长度
+    while i + g.after_days < len(prices):
+        # 取过去ma长度天数的数据
+        range_data = prices[i-g.ma_length: i]
+        # 算均线
+        ma = mean(range_data)
+        # 算标准差
+        sigma = std(range_data)
+        # 算偏差倍数*10，乘十是因为整数更方便操作
+        difference_times_sigma =int(( ((prices[i] - ma) / sigma) // 0.1) )
+        # 如果-10< 偏离倍数 <= -1，因为小于-10的也太异常了，因此也不要
+        if -100< difference_times_sigma <= -10:
+            # 计算输赢结果
+            result = win_or_lose(prices.iloc[i], prices[i+1: i+g.after_days+1], sigma)
+            # 将偏离倍数和输赢结果记录下来
+            my_data.append((difference_times_sigma, result))
+        # i++
+        i += 1
+    return(my_data)
 
-# 判断多头排列后的死叉——卖出
-def is_crossDOWN(data,stock,short,long):
-    if is_highest_point(data,stock,1) and is_highest_point(data,stock,2):
-        if count_ma(stock, short, 1) > count_ma(stock, long, 1)\
-        and count_ma(stock, short, 0) < count_ma(stock, long, 0):
-            log.debug('%s, MAs-2:%.2f, MAl-2:%.2f; MAs-1:%.2f MAl-1:%.2f', stock, count_ma(stock, short, 1), count_ma(stock, long, 1), count_ma(stock, short, 0), count_ma(stock, long, 0))
-            return True
-    return False
+# ---代码块6. 
+# 进行数量统计
+# 输入一list的pairs，每一个pair是偏离倍数和输赢结果
+# 返回一dict,key是偏离倍数，内容是‘输’‘赢’‘平’分别出现多少次
+def compute_statistics(my_data):
+    # 创建字典进行统计
+    statistics = {}
+    # 数据还没空的时候
+    for pair in my_data:
+        # 输赢是怎么样的呀
+        result = pair[1]
+        # 偏离倍数呢
+        value = pair[0]
+        # 如果这个偏离倍数还没出现过
+        if value not in statistics:
+            # 那就记下来！
+            statistics[value] = {'lose': 0, 'even': 0, 'win':0}
+        # 输赢结果的统计加一
+        statistics[value][result] += 1
+    return(statistics)
+
+# --代码块7.判断输赢
+# 输入价格、一Series的价格和sigma，返回是赢还是输还是平
+def win_or_lose(price, my_list, sigma):
+    # 设上限
+    upper_bound = price + g.win_times_sigma * sigma
+    # 设下限
+    lower_bound = price - g.lose_times_sigma * sigma
+    # 未来几天里
+    for future_price in my_list:
+        # 碰到上线了
+        if future_price >= upper_bound:
+            # 赢
+            return('win')
+        # 碰到下线了
+        if future_price <= lower_bound:
+            # 输
+            return('lose')
+    # 要不就是平
+    return('even')
+# ---代码块9.
+# 更新输赢统计
+# 无输出
+# 更新全局变量的偏离倍数和输赢统计DF
+def update_statistics(context):
+    for security in g.security:
+        # 取价格
+        prices = attribute_history(security, 1+g.ma_length+g.after_days, '1d', 'close', skip_paused = True)['close'] 
+        # 上一交易日是否停牌
+        paused = attribute_history(security, 1, '1d', 'paused')['paused'].iloc[0]
+        # 上个交易日没停牌的话就更新
+        if paused == 0:
+            # 算sigma的日子
+            past_prices = prices[0:g.ma_length]
+            # 对应的当天
+            current_price = prices[g.ma_length]
+            # 算输赢的日子
+            future_prices = prices[g.ma_length + 1: ]
+            # 算ma
+            ma = mean(past_prices)
+            # 算sigma
+            sigma = std(past_prices)
+            # 计算和ma差几个sigma 
+            difference_times_sigma = int((current_price - ma)/sigma // 0.1)
+            # 上线
+            upper_bound = current_price + g.win_times_sigma * sigma
+            # 下限
+            lower_bound = current_price - g.lose_times_sigma * sigma
+            # 判断过后几天的输赢
+            result = win_or_lose(current_price, future_prices, sigma)
+            # 把DF转成dict进行操作
+            my_dict = g.stock_stats[security].T.to_dict()
+            # 在合理区间里的话
+            if -100 < difference_times_sigma <= -10:
+                # 如果dict里有这个倍数了
+                if difference_times_sigma in my_dict:
+                    # 直接更新输赢
+                    my_dict[difference_times_sigma][result] += 1 
+                # 如果没有
+                else:
+                    # 加进去
+                    my_dict[difference_times_sigma] = {'value': difference_times_sigma, 'win' : 0, 'even' : 0, 'lose' : 0}
+                    # 更新输赢
+                    my_dict[difference_times_sigma][result] = 1
+            # 更新全局变量
+            g.stock_stats[security] = pd.DataFrame(my_dict, index=['win', 'even', 'lose']).T
+            
+# --代码块10.
+# 判断最佳区间
+# 无输出
+# 返回一dict,key为股票，值为最佳买入区域DF
+def get_best_ranges():
+    stock_best_ranges = {}
+    for security in g.stock_stats:
+        statistics = g.stock_stats[security]
+        # 获取偏离倍数
+        values = statistics.index
+        # 输数
+        loses = statistics['lose']
+        # 赢数
+        wins = statistics['win']
+        # 平数
+        evens = statistics['even']
+        # 总数
+        num_data = sum(wins) + sum(loses) + sum(evens)
+        mydata = []
+        # 在所有位置不会溢出的位置
+        for n in range(min(values), max(values) - (g.band_width-1)):
+            # 取在n和（n+宽度）之间的DF行
+            stat_in_range = statistics[(values >= n) & (values <= n+g.band_width-1)]
+            # 赢除输（这里输+1，因为可能输=0）
+            ratio = float(sum(stat_in_range['win'])) / float((sum(stat_in_range['lose']) + 1))
+            # 这区间数据总量
+            range_data = float(sum(stat_in_range['win']) + sum(stat_in_range['lose']) + sum(stat_in_range['even']))
+            # 如果数据量超过预设的临界值
+            if range_data / num_data >= g.least_percentage:
+                # 记录区间的输赢比
+                mydata.append({'low': n, 'high': n+g.band_width, 'ratio': ratio})
+        # 区间统计转换成DF
+        data_table = pd.DataFrame(mydata)
+        # 按输赢比排序
+        sorted_table = data_table.sort('ratio', ascending = False)
+        # 取第一行
+        stock_best_range = sorted_table.iloc[0]
+        stock_best_ranges[security] = stock_best_range
+    # 输出结果
+    return(stock_best_ranges)
 '''
 ================================================================================
-多均线策略
+均值回归策略
 ================================================================================
 ''' 
 # 获得买入的list_to_buy
@@ -377,39 +537,31 @@ def pick_buy_list(context, data, list_can_buy):
     # 得到一个dataframe：index为股票代码，data为相应的PEG值
     ad_num = 0;
     if g.trade_skill:
+        # 判断最好的买入区间
+        stock_best_ranges = get_best_ranges()
         for stock in list_can_buy:
             if stock in context.portfolio.positions.keys():
                 continue
-            '''
-            if stock not in context.portfolio.positions.keys():
+            stock_best_range = stock_best_ranges[stock]
+            # 看现价
+            current_price = attribute_history(stock,1, '1d', 'close').iloc[0,0]
+            # 取倍数区间低点
+            low = float(stock_best_range['low'])
+            # 取倍数区间高点
+            high = float(stock_best_range['high'])
+            # 取赢率
+            ratio = float(stock_best_range['ratio'])
+            # 获取历史收盘价
+            h = attribute_history(stock, g.ma_length, '1d', ['close'], skip_paused=True)['close']
+            # 计算均线
+            ma = mean(h)
+            # 计算标准差
+            sigma  = std(h)
+            # 算现价的偏离倍数
+            times_sigma = (current_price - ma) / sigma
+            # 如果在该买的区间里
+            if low <= 10 * times_sigma and 10 *times_sigma <= high:
                 list_to_buy.append(stock)
-            '''
-            close = history(1, '1d', 'close', [stock],df = False)[stock][0]
-            # MA60上才考虑买
-            ma60 = count_ma(stock, 60, 0)
-            ma20 = count_ma(stock, 20, 0)
-            if close < ma60:
-                continue
-            # 多头排列——满仓买入
-            if is_highest_point(data,stock,0):
-                # 均线纠缠时，不进行买入操作
-                if is_struggle(count_ma(stock,10,0),count_ma(stock,20,0),count_ma(stock,30,0)):
-                    continue
-                else:
-                    if close < ma20:
-                        list_to_buy.append(stock)
-                        ad_num += 1
-                        if ad_num >= buy_num:
-                            break
-                        continue
-            '''
-            # 空头排列后金叉——满仓买入 10, 20 金叉
-            if is_crossUP(data,stock,10, 20):
-                    list_to_buy.append(stock)
-                    ad_num += 1
-                    if ad_num >= buy_num:
-                        break
-            '''
     else:
         for stock in list_can_buy:
             if stock in context.portfolio.positions.keys():
@@ -497,20 +649,22 @@ def stocks_djx_to_sell(context, data):
         return list_to_sell
     
     for i in list_hold:
+        '''
         close = history(1, '1d', 'close', [i],df = False)[i][0]
         # 跌到MA60卖
         ma60 = count_ma(i, 60, 0)
         if close < ma60:
             list_to_sell.append(i)
             continue
+        '''
         # 均线纠缠时，不进行操作
-        if is_struggle(count_ma(i,5,1),count_ma(i,20,1),count_ma(i,60,1)):
+        if is_struggle(count_ma(i,5,1),count_ma(i,10,1),count_ma(i,20,1)):
             continue
         # 空头排列——清仓卖出
         if is_lowest_point(data,i,-1):
             list_to_sell.append(i)
-        # 多头排列后死叉——清仓卖出 20 叉 60
-        elif is_crossDOWN(data,i,20,60):
+        # 多头排列后死叉——清仓卖出 10 叉 20
+        elif is_crossDOWN(data,i,10,20):
             list_to_sell.append(i)
         '''
         if context.portfolio.positions[i].avg_cost *0.95 >= data[i].close:
@@ -521,7 +675,26 @@ def stocks_djx_to_sell(context, data):
             list_to_sell.append(i)
         '''
     return list_to_sell
-
+# 获得均线卖出信号
+# 输入：context（见API文档）
+# 输出：list_to_sell为list类型，表示待卖出的股票
+def stocks_jzhg_to_sell(context, data):
+    to_sell = []
+    # 对于仓内所有股票
+    for security in context.portfolio.positions:
+        # 取现价
+        current_price = history(1, '1m', 'close', security).iloc[0,0]
+        # 查卖出条件
+        conditions = g.sell_conditions[security]
+        # 看看是不是该卖了
+        if current_price >= conditions['high'] or current_price <= conditions['low'] or conditions['days'] <= 0:
+            # 加入卖出信号，确保没有重复
+            to_sell.append(security)
+        # 如果不需要卖
+        else:
+            # 日数减1
+            g.sell_conditions[security]['days'] -= 1
+    return(to_sell)
 #8
 # 获得卖出信号
 # 输入：context（见API文档）, list_to_buy为list类型，代表待买入的股票
@@ -531,7 +704,7 @@ def stocks_to_sell(context, data, list_to_buy):
     list_to_sell = []
     # list_to_sell = get_clear_stock(context, list_to_buy)
     if g.trade_skill:
-        list_to_sell2 = stocks_djx_to_sell(context, data)
+        list_to_sell2 = stocks_jzhg_to_sell(context, data)
         for i in list_to_sell2:
             if i not in list_to_sell:
                 list_to_sell.append(i)
@@ -541,13 +714,17 @@ def stocks_to_sell(context, data, list_to_buy):
 # 平仓，卖出指定持仓
 # 平仓成功并全部成交，返回True
 # 报单失败或者报单成功但被取消（此时成交量等于0），或者报单非全部成交，返回False
-def close_position(position):
+def close_position(context, position):
     security = position.security
     order = order_target_value_(security, 0) # 可能会因停牌失败
     if order != None:
         if order.filled > 0 and g.flag_stat:
             # 只要有成交，无论全部成交还是部分成交，则统计盈亏
             g.trade_stat.watch(security, order.filled, position.avg_cost, position.price)
+    
+    if security in context.portfolio.positions:
+        # 把天数清零
+        g.sell_conditions[security]['days'] = 0
     return False
     
     
@@ -572,7 +749,7 @@ def order_target_value_(security, value):
 def sell_operation(context, list_to_sell):
     for stock_sell in list_to_sell:
         position = context.portfolio.positions[stock_sell]
-        close_position(position)
+        close_position(context, position)
 
 
 #10
@@ -585,6 +762,21 @@ def buy_operation(context, list_to_buy):
         g.capital_unit=context.portfolio.portfolio_value/g.num_stocks
         # 买入在"待买股票列表"的股票
         order_target_value(stock_buy, g.capital_unit)
+        if stock_buy in context.portfolio.positions:
+            # 看现价
+            current_price = attribute_history(stock_buy,1, '1d', 'close').iloc[0,0]
+            # 获取历史收盘价
+            h = attribute_history(stock_buy, g.ma_length, '1d', ['close'], skip_paused=True)['close']
+            # 计算均线
+            ma = mean(h)
+            # 计算标准差
+            sigma  = std(h)
+            # 止损线
+            low = current_price - g.loss_times_sigma * sigma
+            # 止盈线
+            high = current_price + g.profit_times_sigma * sigma
+            # 在全局变量中记录卖出条件
+            g.sell_conditions[stock_buy] = {'high': high, 'low': low, 'days': g.after_days-1}
 
 '''
 ================================================================================
