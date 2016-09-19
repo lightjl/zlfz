@@ -27,7 +27,7 @@ def set_params():
     g.stocks=get_all_securities(['stock']).index # 设置上市A股为初始股票池 000002.XSHG
    
     
-    g.per = 0.05                                 # EPS增长率不低于0.25
+    g.per = 0.1                                 # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
     g.trade_skill = True                         # 开启交易策略
 
@@ -107,10 +107,10 @@ def set_slip_fee(context):
 '''
 # 每天回测时做的事情
 def handle_data(context,data):
-    # 待卖出的股票，list类型
-    list_to_sell = stocks_to_sell(context, data, g.feasible_stocks)
     # 需买入的股票
     list_to_buy = pick_buy_list(context, data, g.feasible_stocks)
+    # 待卖出的股票，list类型
+    list_to_sell = stocks_to_sell(context, data, list_to_buy)
     # 卖出操作
     sell_operation(context,list_to_sell)
     # 买入操作
@@ -553,7 +553,7 @@ def stocks_udma_to_sell(context, data):
 def stocks_to_sell(context, data, list_to_buy):
     # 对于不需要持仓的股票，全仓卖出
     list_to_sell = []
-    list_to_sell = get_clear_stock(context, list_to_buy)
+    # list_to_sell = get_clear_stock(context, list_to_buy)
     if g.trade_skill:
         list_to_sell2 = stocks_udma_to_sell(context, data)
         for i in list_to_sell2:
