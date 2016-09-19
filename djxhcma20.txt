@@ -1,0 +1,283 @@
+import tradestat
+
+
+def initialize(context):
+    g.stock = []                  #设置股票池
+    g.index_choose =['000010.XSHG', '399101.XSHE','399006.XSHE']  #上证180,中小板综,创业板指
+    g.pe_max = [8,16,32]
+    
+    set_benchmark('000300.XSHG')            # 设置基准指数：沪深300指数 '000300.XSHG'
+    set_option('use_real_price', True)
+    g.index = '000001.XSHG'
+    g.month = context.current_dt.month
+    g.stock_grade = [0]
+    g.cash = 20000
+    g.num_stocks = 5                        # 最多买5个
+    g.flag_stat = True                      # 默认不开启统计
+    # 加载统计模块
+    if g.flag_stat:
+        g.trade_stat = tradestat.trade_stat()
+
+'''
+================================================================================
+每天开盘前
+================================================================================
+'''
+def pick_pe_stock(index_code, pe_max):
+    stocks = get_index_stocks(index_code)
+    list_stock = []
+    list_pe = []
+    q = query(valuation.code, valuation.pe_ratio).filter(valuation.code.in_(stocks))
+    pe = get_fundamentals(q)
+    pe.dropna()
+    pe = pe[(pe.pe_ratio>0) & (pe.pe_ratio<pe_max)]
+    return pe['code'].values
+
+#每天开盘前要做的事情
+def before_trading_start(context):
+    set_slip_fee(context)                 # 设置手续费与手续费
+    g.stock = []
+    for i in range(len(g.index_choose)):
+        g.stock.extend(pick_pe_stock(g.index_choose[i], g.pe_max[i]))
+    #print (g.stock)
+
+# 根据不同的时间段设置滑点与手续费
+# 输入：context（见API）
+# 输出：none
+def set_slip_fee(context):
+    # 将滑点设置为0
+    set_slippage(FixedSlippage(0)) 
+    # 根据不同的时间段设置手续费
+    dt=context.current_dt
+    if dt>datetime.datetime(2013,1, 1):
+        set_commission(PerTrade(buy_cost=0.0003, sell_cost=0.0013, min_cost=5)) 
+        
+    elif dt>datetime.datetime(2011,1, 1):
+        set_commission(PerTrade(buy_cost=0.001, sell_cost=0.002, min_cost=5))
+            
+    elif dt>datetime.datetime(2009,1, 1):
+        set_commission(PerTrade(buy_cost=0.002, sell_cost=0.003, min_cost=5))
+    else:
+        set_commission(PerTrade(buy_cost=0.003, sell_cost=0.004, min_cost=5))
+            
+    
+# 过滤停牌股票
+def filter_paused_stock(stock_list):
+    current_data = get_current_data()
+    return [stock for stock in stock_list if not current_data[stock].paused]
+    
+# 计算股票过去n个单位时间（一天）均值
+# n 天的MA， day_before天前
+def count_ma(stock,n, day_before):
+    #log.debug(day_before, history(n+day_before, '1d', 'close', [stock])[stock])
+    #log.debug(history(n+day_before, '1d', 'close', [stock],df = False)[stock][0:n].mean())
+    return history(n+day_before, '1d', 'close', [stock],df = False,skip_paused=True)[stock][0:n].mean()
+
+
+# 判断多头排列 （5/20/60/130）
+def is_highest_point(data,stock,n):
+    if count_ma(stock,5,-n) > count_ma(stock,20,-n)\
+    and count_ma(stock,20,-n) > count_ma(stock,60,-n)\
+    and count_ma(stock,60,-n) > count_ma(stock,130,-n):
+        
+        return True
+    return False
+
+# 判断空头排列——空仓 （5/20/60/130）
+def is_lowest_point(data,stock,n):
+    if count_ma(stock,5,-n) < count_ma(stock,20,-n)\
+    and count_ma(stock,20,-n) < count_ma(stock,60,-n)\
+    and count_ma(stock,60,-n) < count_ma(stock,130,-n):
+        return True
+    return False
+    
+# 判断多头排列后的死叉——卖出
+def is_crossDOWN(data,stock,short,long):
+    if is_highest_point(data,stock,-2)\
+    and is_highest_point(data,stock,-3):
+        if count_ma(stock, short, 2) > count_ma(stock, long, 2)\
+        and count_ma(stock, short, 1) < count_ma(stock, long, 1):
+            return True
+    return False
+
+# 判断空头排列后的金叉——买入， 10日线， 20日线
+def is_crossUP(data,stock,short,long):
+    if is_lowest_point(data,stock,-2) and is_lowest_point(data,stock,-3):
+        if count_ma(stock, short, 2) < count_ma(stock, long, 2)\
+        and count_ma(stock, short, 1) > count_ma(stock, long, 1):
+            return True
+    return False
+
+# 判断均线纠缠
+def is_struggle(mavg1,mavg2,mavg3):
+    if abs((mavg1-mavg2)/mavg2)< 0.003\
+    or abs((mavg2-mavg3)/mavg3)< 0.002:
+        return True
+    return False
+    
+def stocks_can_buy(data, context):
+    list_can_buy = []
+    # current_data = get_current_data()
+    # current_data[stock].close:
+    for stock in g.stock:
+        #log.debug('%s, 5day before ma5= %.2f' ,stock, count_ma(stock, 5, 5))
+        if stock in context.portfolio.positions.keys():
+            continue
+        
+        close = history(1, '1d', 'close', [stock],df = False)[stock][0]
+        # MA60上才考虑买
+        ma60 = count_ma(stock, 60, 0)
+        ma20 = count_ma(stock, 20, 0)
+        if close < ma60:
+            continue
+        # 多头排列——满仓买入
+        if is_highest_point(data,stock,-1):
+            if close < ma20:
+                #log.debug('%s, %.2f, MA20=%.2f', stock, close, ma20)
+                list_can_buy.append(stock)
+                #order_target_value(stock,g.cash)
+        
+    return list_can_buy
+    
+# 获得卖出信号
+# 输入：context（见API文档）, list_to_buy为list类型，代表待买入的股票
+# 输出：list_to_sell为list类型，表示待卖出的股票
+def stocks_to_sell(context, data):
+    list_to_sell = []
+    list_hold = context.portfolio.positions.keys()
+    if len(list_hold) == 0:
+        return list_to_sell
+    
+    for i in list_hold:
+        close = history(1, '1d', 'close', [i],df = False)[i][0]
+        # 跌到MA60卖
+        ma60 = count_ma(i, 60, 0)
+        if close < ma60:
+            list_to_sell.append(i)
+            continue
+        # 均线纠缠时，不进行操作
+        if is_struggle(count_ma(i,5,1),count_ma(i,20,1),count_ma(i,60,1)):
+            continue
+        # 空头排列——清仓卖出
+        if is_lowest_point(data,i,-1):
+            list_to_sell.append(i)
+        # 多头排列后死叉——清仓卖出 20 叉 60
+        elif is_crossDOWN(data,i,20,60):
+            list_to_sell.append(i)
+        '''
+        if context.portfolio.positions[i].avg_cost *0.95 >= data[i].close:
+            #亏损 5% 卖出
+            list_to_sell.append(i)
+        '''
+        if context.portfolio.positions[i].avg_cost *1.2 <= data[i].close:
+            #赚 20% 卖出
+            list_to_sell.append(i)
+    return list_to_sell
+    
+# 获得买入的list_to_buy
+# 输入list_can_buy 为list，可以买的队列
+# 输出list_to_buy 为list，买入的队列
+def pick_buy_list(context, data, list_can_buy, list_to_sell):
+    list_to_buy = []
+    # 要买数 = 可持数 - 持仓数 + 要卖数
+    buy_num = g.num_stocks - len(context.portfolio.positions.keys()) + len(list_to_sell)
+    if buy_num <= 0:
+        return list_to_buy
+    # 得到一个dataframe：index为股票代码，data为相应的PEG值
+    # 处理-------------------------------------------------
+    current_data = get_current_data()
+    ad_num = 0;
+    for i in list_can_buy:
+        if i not in context.portfolio.positions.keys():
+            # 没有持仓这股票, 假如这股票此时红盘就买入
+            # if data[i].close > current_data[i].day_open:
+            list_to_buy.append(i)
+            ad_num = ad_num + 1
+        if ad_num >= buy_num:
+            break
+    return list_to_buy    
+
+# 平仓，卖出指定持仓
+# 平仓成功并全部成交，返回True
+# 报单失败或者报单成功但被取消（此时成交量等于0），或者报单非全部成交，返回False
+def close_position(position):
+    security = position.security
+    order = order_target_value_(security, 0) # 可能会因停牌失败
+    if order != None:
+        if order.filled > 0 and g.flag_stat:
+            # 只要有成交，无论全部成交还是部分成交，则统计盈亏
+            g.trade_stat.watch(security, order.filled, position.avg_cost, position.price)
+
+    return False
+    
+# 自定义下单
+# 根据Joinquant文档，当前报单函数都是阻塞执行，报单函数（如order_target_value）返回即表示报单完成
+# 报单成功返回报单（不代表一定会成交），否则返回None
+def order_target_value_(security, value):
+    if value == 0:
+        log.debug("Selling out %s" % (security))
+    else:
+        log.debug("Order %s to value %f" % (security, value))
+        
+    # 如果股票停牌，创建报单会失败，order_target_value 返回None
+    # 如果股票涨跌停，创建报单会成功，order_target_value 返回Order，但是报单会取消
+    # 部成部撤的报单，聚宽状态是已撤，此时成交量>0，可通过成交量判断是否有成交
+    return order_target_value(security, value)
+
+# 清空卖出所有持仓
+def clear_position(context):
+    if context.portfolio.positions:
+        log.info("==> 清仓，卖出所有股票")
+        for stock in context.portfolio.positions.keys():
+            position = context.portfolio.positions[stock]
+            close_position(position)
+            
+#9
+# 执行卖出操作
+# 输入：list_to_sell为list类型，表示待卖出的股票
+# 输出：none
+def sell_operation(context, list_to_sell):
+    for stock_sell in list_to_sell:
+        position = context.portfolio.positions[stock_sell]
+        close_position(position)
+        
+#10
+# 执行买入操作
+# 输入：context(见API)；list_to_buy为list类型，表示待买入的股票
+# 输出：none
+def buy_operation(context, list_to_buy):
+    for stock_buy in list_to_buy:
+        # 为每个持仓股票分配资金
+        g.capital_unit=context.portfolio.portfolio_value/g.num_stocks
+        # 买入在"待买股票列表"的股票
+        order_target_value(stock_buy, g.capital_unit)
+    
+def handle_data(context, data):
+    close_index = history(1, '1d', 'close', [g.index],df = False)[g.index][0]
+    # 大盘跌到MA60下清仓
+    ma60_index = count_ma(g.index, 60, 0)
+    if close_index < ma60_index:
+        clear_position(context)
+        return
+    list_can_buy = stocks_can_buy(data, context)    
+    # 待卖出的股票，list类型
+    list_to_sell = stocks_to_sell(context, data)
+    # 过滤掉当日停牌的股票
+    list_to_sell = filter_paused_stock(list_to_sell)
+
+    # 需买入的股票
+    list_to_buy = pick_buy_list(context, data, list_can_buy, list_to_sell)
+
+    sell_operation(context, list_to_sell)
+    
+    buy_operation(context, list_to_buy)
+    
+    
+'''
+================================================================================
+每天交易后
+================================================================================
+'''
+def after_trading_end(context):
+    if g.flag_stat:
+        g.trade_stat.report(context)
