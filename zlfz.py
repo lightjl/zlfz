@@ -27,7 +27,6 @@ def set_params():
     g.stocks=get_all_securities(['stock']).index # 设置上市A股为初始股票池 000002.XSHG
 
     
-    
     g.per = 0.1                                  # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
     g.trade_skill = True                         # 不开启交易策略
