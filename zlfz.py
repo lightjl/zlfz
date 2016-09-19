@@ -28,9 +28,9 @@ def set_params():
     # log.debug(g.stocks)
     
     
-    g.per = 0.05                                 # EPS增长率不低于0.25
+    g.per = 0.1                                  # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
-    g.trade_skill = True                        # 不开启交易策略
+    g.trade_skill = True                        s # 不开启交易策略
 
 #2
 #设置中间变量
@@ -529,7 +529,7 @@ def stocks_djx_to_sell(context, data):
 def stocks_to_sell(context, data, list_to_buy):
     # 对于不需要持仓的股票，全仓卖出
     list_to_sell = []
-    list_to_sell = get_clear_stock(context, list_to_buy)
+    # list_to_sell = get_clear_stock(context, list_to_buy)
     if g.trade_skill:
         list_to_sell2 = stocks_djx_to_sell(context, data)
         for i in list_to_sell2:
