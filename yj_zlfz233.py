@@ -3,40 +3,31 @@ from datetime import date
 from datetime import datetime, timedelta
 import pandas as pd
 all_stcok = get_all_securities(['stock'])
-
 per = 0.1
+
 #4
 # 设置可行股票池：过滤掉当日停牌的股票
 # 输入：initial_stocks为list类型,表示初始股票池； context（见API）
 # 输出：unsuspened_stocks为list类型，表示当日未停牌的股票池，即：可行股票池
-def set_feasible_stocks(initial_stocks,context):
-    # 判断初始股票池的股票是否停牌，返回list
-    unsuspened_stocks =filter_paused_stock(initial_stocks)    
-    unsuspened_stocks = filter_st_stock(unsuspened_stocks)
+def set_feasible_stocks(initial_stocks):
+    # 判断初始股票池的股票是否停牌，返回list  
+    unsuspened_stocks = filter_st_stock(initial_stocks)
     return unsuspened_stocks
 
-# 过滤停牌股票
-def filter_paused_stock(stock_list):
-    current_data = get_current_data()
-    return [stock for stock in stock_list if not current_data[stock].paused]
-    
 # 过滤ST及其他具有退市标签的股票
-def filter_st_stock(stock_list):
-    current_data = get_current_data()
-    return [stock for stock in stock_list 
-        if not current_data[stock].is_st 
-        and 'ST' not in current_data[stock].name 
-        and '*' not in current_data[stock].name 
-        and '退' not in current_data[stock].name]
+def filter_st_stock(initial_stocks):
     
-       
-czg=pd.DataFrame() 
+    df_st_info = get_extras('is_st',initial_stocks,start_date=datetime.now(),end_date=datetime.now())
+    df_st_info = df_st_info.T
+    df_st_info.rename(columns={df_st_info.columns[0]:'is_st'}, inplace=True)
+    unsuspened_stocks = list(df_st_info.index[df_st_info.is_st == False])
+    return unsuspened_stocks
 
 #6
 # 计算股票的PEG值
 # 输入：context(见API)；stock_list为list类型，表示股票池
 # 输出：df_PEG为dataframe: index为股票代码，data为相应的PEG值
-def get_PEG(context, stock_list): 
+def get_PEG(stock_list): 
     # 查询股票池里股票的市盈率，收益增长率
     q_PE_G = query(valuation.code, valuation.pe_ratio, indicator.inc_operation_profit_year_on_year
                  ).filter(valuation.code.in_(stock_list)) 
@@ -58,8 +49,9 @@ def get_PEG(context, stock_list):
     # 将Series类型转换成dataframe类型
     df_PEG = pd.DataFrame(Series_PEG)
     return df_PEG
-    
-def get_growth_stock( stock_list): 
+def get_growth_stock(stock_list, flag_result): 
+    print 'start'
+    pe_ration_max = 40
     # 查询股票池里股票的市盈率，收益增长率 indicator.inc_operation_profit_year_on_year
     q_PE_G = query(valuation.code, valuation.pe_ratio, indicator.inc_operation_profit_year_on_year
                  ).filter(valuation.code.in_(stock_list)) 
@@ -67,7 +59,8 @@ def get_growth_stock( stock_list):
     # 默认date = context.current_dt的前一天,使用默认值，避免未来函数，不建议修改
     df_PE_G = get_fundamentals(q_PE_G)
     # 筛选出成长股：删除市盈率或收益增长率为负值的股票
-    df_Growth_PE_G = df_PE_G[(df_PE_G.pe_ratio >0)&(df_PE_G.inc_operation_profit_year_on_year >0)]
+    df_Growth_PE_G = df_PE_G[(df_PE_G.pe_ratio>0)&(df_PE_G.pe_ratio<pe_ration_max)\
+        &(df_PE_G.inc_operation_profit_year_on_year >20)]
     # 去除PE或G值为非数字的股票所在行
     df_Growth_PE_G.dropna()
 
@@ -82,16 +75,30 @@ def get_growth_stock( stock_list):
     for i in list_fdc:
         if i in list_stock:
             list_stock.remove(i)
-    
-    now = datetime.now()  
-    year = now.year-1                   #last year
-    yearL = [year-i for i in range(5)]  # 2015 2014 2013
-    
-    q_PE_G2 = query(valuation.code, valuation.capitalization, cash_flow.pubDate,income.basic_eps,\
-	            cash_flow.subtotal_operate_cash_inflow, cash_flow.subtotal_operate_cash_outflow,\
+    # 去掉超大盘 000043.XSHG 399980.XSHE
+    cdp = get_index_stocks('000043.XSHG')
+    for i in cdp:
+        if i in list_stock:
+            list_stock.remove(i)
+    cdp = get_index_stocks('399980.XSHE')
+    for i in cdp:
+        if i in list_stock:
+            list_stock.remove(i)
+            
+    q_PE_G2 = query(valuation.code, valuation.capitalization, \
+                cash_flow.pubDate,income.basic_eps, valuation.pe_ratio,\
+	            cash_flow.subtotal_operate_cash_inflow, \
+                cash_flow.subtotal_operate_cash_outflow,\
 	            indicator.inc_operation_profit_year_on_year,\
                 balance.total_liability, balance.total_sheet_owner_equities
                  ).filter(valuation.code.in_(list_stock))
+    now = datetime.now()  
+    year = now.year                   #year
+    month = now.month
+    yearP1 = get_fundamentals(q_PE_G2, statDate=str(year-1))
+    yearL = [year-5+i for i in range(5)]  # 2011 2012 2013 2014 2015 今年2016
+    
+
     '''    
     q_PE_G2 = query(valuation.code, valuation.capitalization, cash_flow.pubDate,indicator.eps,\
 	            cash_flow.subtotal_operate_cash_inflow, cash_flow.subtotal_operate_cash_outflow,\
@@ -99,12 +106,18 @@ def get_growth_stock( stock_list):
                  ).filter(valuation.code.in_(list_stock))
     '''             
     yearP = [get_fundamentals(q_PE_G2, statDate=str(yearL[i])) for i in range(5)]
+    
     q_now = query(valuation.code, valuation.capitalization, valuation.pe_ratio)
     df_now = get_fundamentals(q_now)
-    last_month = date(datetime.now().year,datetime.now().month,1)-timedelta(1) 
-    last_2month = date(datetime.now().year,datetime.now().month-1,1)-timedelta(1)
-    last_year = date(datetime.now().year-1,datetime.now().month,1)-timedelta(1) 
-    dp_price = get_price('000001.XSHG', start_date=last_year, end_date=last_month+timedelta(1) , frequency='daily', fields='close')
+    last_month = date(year,month,1)-timedelta(1) 
+    if month > 1:
+         last_2month = date(year,month-1,1)-timedelta(1)
+    else:
+         last_2month = date(year-1,12,1)-timedelta(1)
+    last_year = date(year-1,month,1)-timedelta(1) 
+
+    dp_price = get_price('000001.XSHG', start_date=last_year-timedelta(20), \
+        end_date=last_month+timedelta(1) , frequency='daily', fields='close')
     while last_month not in dp_price.index:
         last_month = last_month-timedelta(1) 
     while last_2month not in dp_price.index:
@@ -121,71 +134,81 @@ def get_growth_stock( stock_list):
     results = []
     list_pick = []
     for i in list_stock:
-        
+        start_yearth = 1
+        if yearP1[yearP1.code==i].empty:
+            start_yearth = 0
+        elif now.strftime("%Y-%m-%d") < yearP1[yearP1.code==i]['pubDate'].values[0]:
+            start_yearth = 0
+            # 未公布
         # print yearP[0][(yearP[0].code==i)]
         # print i
         flag_empty = False
-        for j in range(4):
+        for j in range(start_yearth, 4+start_yearth):
             if yearP[j][yearP[j].code==i].empty:
                 flag_empty = True
+                break
         if flag_empty:
             continue
         
         eps = [1]*4
         for j in range(4):
-            eps[j] = yearP[j][yearP[j].code==i]['basic_eps'].values[0]
-        if eps[3]<0:
+            eps[j] = yearP[j+start_yearth][yearP[j+start_yearth].code==i]['basic_eps'].values[0]
+        if eps[0]<0:
             continue
         # eps = [ yearP[j][ (yearP[j].code==i).loc[0, 'basic_eps'] ] for j in range(4) ]
         # print eps
         cap = [1]*4
         for j in range(4):
-            cap[j] = yearP[j][yearP[j].code==i]['capitalization'].values[0]
+            cap[j] = yearP[j+start_yearth][yearP[j+start_yearth].code==i]['capitalization'].values[0]
         cap_now = df_now[df_now.code==i]['capitalization'].values[0]
-        flag = True        
-        for j in range(3):      # 0:now 1:last
-            if eps[j]*cap[j] < (1+per)*eps[j+1]*cap[j+1]:
-                flag = False
+        flag_cz = True         
+        for j in range(3):
+            if (1+per)*eps[j]*cap[j] > eps[j+1]*cap[j+1]:
+                flag_cz = False
                 break
-        xjl =  yearP[0][yearP[0].code==i]['subtotal_operate_cash_inflow'].values - \
-            yearP[0][yearP[0].code==i]['subtotal_operate_cash_outflow'].values
-        xjlb = round(xjl/cap[0]/10000/eps[0],2)
-        if flag:
+        df_lastyear = yearP[3+start_yearth][yearP[3+start_yearth].code==i]
+        if flag_cz:
             #results.append([['%.2f'%eps[3-j]*cap[3-j]/cap[0]  for j in range(3)]])
-            gg_price = get_price(i, start_date=last_year, end_date=datetime.now(), frequency='daily', fields='close')
+            gg_price = get_price(i, start_date=last_year, end_date=last_month+timedelta(1), frequency='daily', fields='close')
+            scoreOfStock = 0
+            zcfzl = df_lastyear['total_liability'].values[0]/df_lastyear['total_sheet_owner_equities'].values[0]
+            if df_lastyear['pe_ratio'].values[0] <= pe_ration_max:
+                if zcfzl<0.5:
+                    scoreOfStock += 1
+                xjl = df_lastyear['subtotal_operate_cash_inflow'].values[0] - \
+                    df_lastyear['subtotal_operate_cash_outflow'].values[0]
+                xjlb = round(xjl/cap[3]/10000/eps[3],2)
+                
+                if df_lastyear['subtotal_operate_cash_inflow'].values[0] - df_lastyear['subtotal_operate_cash_outflow'].values[0] > df_lastyear['basic_eps'].values[0]*df_lastyear['capitalization'].values[0]*10000:
+                    scoreOfStock += 1
             # print gg_price['close'].describe()['max']
-            high_price = gg_price['close'].describe()['max']
-            low_price = gg_price['close'].describe()['min']
-            dpqd1 = (dp_price['close'][last_month]-dp_price['close'][last_2month])/dp_price['close'][last_2month]
-            ggqd1 = (gg_price['close'][last_month]-gg_price['close'][last_2month])/gg_price['close'][last_2month]
-            dpqd12 = (dp_price['close'][last_month]-dp_price['close'][last_year])/dp_price['close'][last_year]
-            ggqd12 = (gg_price['close'][last_month]-gg_price['close'][last_year])/gg_price['close'][last_year]
-            xdqd12 = round((ggqd12 - dpqd12)/ abs(dpqd12),2)
-            xdqd1 = round((ggqd1 - dpqd1)/ abs(dpqd1),2)
-            zcfzl = round(100*yearP[0][yearP[0].code==i]['total_liability'].values / yearP[0][yearP[0].code==i]['total_sheet_owner_equities'].values,2)
-            #+ datetime.timedelta(days = -1)
-            #results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12] + ['%.2f'%(eps[3-j]*cap[3-j]/cap[0])  for j in range(4)] + [xjl] )
-            '''
-            pe_ratio = df_now[df_now.code==i]['pe_ratio'].values[0]
-            eps_next = round(gg_price['close'][-2]/pe_ratio,2)
-            PEG = pe_ratio/((eps_next-eps[0])/eps[0]*100)
-            '''
-            num_score = 0
-            if xdqd12 > xdqd1 and xdqd1 > 0:
-                num_score += 1
-            if xjlb > 1:
-                num_score += 1
-            if zcfzl < 50:
-                num_score += 1
-            if num_score >= 2:
-                results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[3-j]*cap[3-j]/cap_now)  for j in range(1,4)] + [xjlb, low_price, high_price, zcfzl, cap[0], cap_now, num_score] )
-                list_pick.append(i)
-            # print results
-    columns=[u'code', u'名称', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(2)).strftime("%m-%d") ] + ['%dEPS'% (yearL[3-i]) for i in range(1,4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
-    # 
-    czg = pd.DataFrame(data=results, columns=columns)
-    czg.sort(columns=u'分数', ascending = False, inplace=True)
+                high_price = gg_price['close'].describe()['max']
+                low_price = gg_price['close'].describe()['min']
+                dpqd1 = (dp_price['close'][last_month]-dp_price['close'][last_2month])/dp_price['close'][last_2month]
+                ggqd1 = (gg_price['close'][last_month]-gg_price['close'][last_2month])/gg_price['close'][last_2month]
+                dpqd12 = (dp_price['close'][last_month]-dp_price['close'][last_year])/dp_price['close'][last_year]
+                ggqd12 = (gg_price['close'][last_month]-gg_price['close'][last_year])/gg_price['close'][last_year]
+                xdqd12 = round((ggqd12 - dpqd12)/ abs(dpqd12),2)
+                xdqd1 = round((ggqd1 - dpqd1)/ abs(dpqd1),2)
+
+                #+ datetime.timedelta(days = -1)
+                #results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12] + ['%.2f'%(eps[3-j]*cap[3-j]/cap[0])  for j in range(4)] + [xjl] )
+
+                if xdqd12 > xdqd1 and xdqd1 > 0:
+                    scoreOfStock += 1
+
+                if scoreOfStock >= 2:
+                    list_pick.append(i)
+                    if flag_result:
+                        results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[0], cap_now, scoreOfStock] )
     
+    if flag_result:
+        columns=[u'code', u'名称', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(2)).strftime("%m-%d") ] + ['%dEPS'% (yearL[j+start_yearth]) for j in range(4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
+    # 
+        czg = pd.DataFrame(data=results, columns=columns)
+        czg.sort(columns=u'分数', ascending = False, inplace=True)
+        print czg
+        
     df_PEG = get_PEG(list_pick)
     
     df_sort_PEG = df_PEG.sort(columns=[0], ascending=[1])
@@ -203,40 +226,57 @@ def get_growth_stock( stock_list):
         for i in range(len(df_sort_PEG.index)):
             if df_sort_PEG.ix[i,0] >= 0.6 and df_sort_PEG.ix[i,0] < 0.75:
                 list_can_buy.append(df_sort_PEG.index[i])
-    czg_buy = pd.DataFrame() 
-    buy_list = []
-    for i in list_can_buy:
-        df_buy = czg[czg.code==i]
-        buy_list.append([i, df_buy['名称'].values[0], df_sort_PEG.ix[i,0], df_buy['1月强度'].values[0], df_buy['1年强度'].values[0], df_buy[(datetime.now()-timedelta(2)).strftime("%m-%d")].values[0], df_buy['现金比'].values[0], df_buy['12L'].values[0]], df_buy['12H'].values[0]], df_buy['负债率'].values[0], df_buy['上年股本'].values[0], df_buy['现股本'].values[0], df_buy['分数'].values[0] )
-    return czg
-    #print results
+
     
-#7
-# 获得买入信号
-# 输入：context(见API)
-# 输出：list_to_buy为list类型,表示待买入的g.num_stocks支股票
-def stocks_can_buy():
-    list_can_buy = []
-    # 得到一个dataframe：index为股票代码，data为相应的PEG值
-    df_PEG = get_PEG( get_growth_stock(g.feasible_stocks))
-    # 将股票按PEG升序排列，返回daraframe类型
-    df_sort_PEG = df_PEG.sort(columns=[0], ascending=[1])
-    # 将存储有序股票代码index转换成list并取前g.num_stocks个为待买入的股票，返回list
-
-    #nummax = min(len(df_PEG.index), g.num_stocks-len(.portfolio.positions.keys()))
+    if flag_result:
+        czg_buy = pd.DataFrame() 
+    
+        buy_list = []
+        for i in list_can_buy:
+            df_buy = czg[czg.code==i]
+            
+            buy_list.append([ i, df_buy[u'名称'].values[0], round(df_sort_PEG.ix[i,0],2), \
+                df_buy[u'1月强度'].values[0], df_buy[u'1年强度'].values[0] ] 
+                + [df_buy[str(yearL[start_yearth])+'EPS'].values[0] ] \
+                + [df_buy[str(yearL[start_yearth+1])+'EPS'].values[0] ] \
+                + [df_buy[str(yearL[start_yearth+2])+'EPS'].values[0] ] \
+                + [df_buy[str(yearL[start_yearth+3])+'EPS'].values[0] ] \
+                + [df_buy[(datetime.now()-timedelta(2)).strftime("%m-%d")].values[0], \
+                df_buy[u'现金比'].values[0], df_buy[u'12L'].values[0], 
+                df_buy[u'12H'].values[0], df_buy[u'负债率'].values[0], \
+                df_buy[u'上年股本'].values[0], df_buy[u'现股本'].values[0], \
+                df_buy[u'分数'].values[0] ] )
         
-    for i in range(len(df_sort_PEG.index)):
-        if df_sort_PEG.ix[i,0] < 0.6:
-            list_can_buy.append(df_sort_PEG.index[i])
-        else:
-            break
-    if len(list_can_buy) < 3:
-        for i in range(len(df_sort_PEG.index)):
-            if df_sort_PEG.ix[i,0] >= 0.6 and df_sort_PEG.ix[i,0] < 0.75:
-                list_can_buy.append(df_sort_PEG.index[i])
-
+        columns2=[u'code', u'名称', u'PEG', u'1月强度', u'1年强度'] \
+            + ['%dEPS'% (yearL[j+start_yearth]) for j in range(4)] \
+            + [(datetime.now()-timedelta(2)).strftime("%m-%d") ] \
+            + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
+        czg_buy = pd.DataFrame(data=buy_list, columns=columns2)
+        return czg_buy
     return list_can_buy
+    #print results
 
-feasible_stocks = set_feasible_stocks(get_all_securities(['stock']).index) 
-czg = get_growth_stock(feasible_stocks)
-czg
+
+list1 = get_all_securities(['stock']).index[:1000]
+list2 = get_all_securities(['stock']).index[1001:2000]
+list3 = get_all_securities(['stock']).index[2001:]
+
+stocks1 = set_feasible_stocks(list1) 
+result1 = get_growth_stock(stocks1, False)
+stocks2 = set_feasible_stocks(list2) 
+result2 = get_growth_stock(stocks2, False)
+stocks3 = set_feasible_stocks(list3) 
+result3 = get_growth_stock(stocks3, False)
+results = []
+for i in result1:
+    if i not in results:
+        results.append(i)
+for i in result2:
+    if i not in results:
+        results.append(i)
+for i in result2:
+    if i not in results:
+        results.append(i)
+print results
+df_czg = get_growth_stock(results, True)
+df_czg
