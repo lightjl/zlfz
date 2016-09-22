@@ -28,7 +28,7 @@ def filter_st_stock(initial_stocks):
 # 输入：context(见API)；stock_list为list类型，表示股票池
 # 输出：df_PEG为dataframe: index为股票代码，data为相应的PEG值
 def get_PEG(stock_list): 
-    # 查询股票池里股票的市盈率，收益增长率
+    # 查询股票池里股票的市盈率，营业利润同比增长率
     q_PE_G = query(valuation.code, valuation.pe_ratio, indicator.inc_operation_profit_year_on_year
                  ).filter(valuation.code.in_(stock_list)) 
     # 得到一个dataframe：包含股票代码、市盈率PE、收益增长率G
@@ -200,7 +200,7 @@ def get_growth_stock(stock_list, flag_result):
                 if scoreOfStock >= 2:
                     list_pick.append(i)
                     if flag_result:
-                        results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[0], cap_now, scoreOfStock] )
+                        results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[3], cap_now, scoreOfStock] )
     
     if flag_result:
         columns=[u'code', u'名称', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(2)).strftime("%m-%d") ] + ['%dEPS'% (yearL[j+start_yearth]) for j in range(4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
@@ -222,7 +222,7 @@ def get_growth_stock(stock_list, flag_result):
             list_can_buy.append(df_sort_PEG.index[i])
         else:
             break
-    if len(list_can_buy) < 3:
+    if len(list_can_buy) < 5:
         for i in range(len(df_sort_PEG.index)):
             if df_sort_PEG.ix[i,0] >= 0.6 and df_sort_PEG.ix[i,0] < 0.75:
                 list_can_buy.append(df_sort_PEG.index[i])
