@@ -49,7 +49,7 @@ def get_PEG(stock_list):
     # 将Series类型转换成dataframe类型
     df_PEG = pd.DataFrame(Series_PEG)
     return df_PEG
-def get_growth_stock(stock_list, flag_result): 
+def get_growth_stock(stock_list, flag_result, flag_pick): 
     print 'start'
     pe_ration_max = 40
     # 查询股票池里股票的市盈率，收益增长率 indicator.inc_operation_profit_year_on_year
@@ -171,7 +171,7 @@ def get_growth_stock(stock_list, flag_result):
             #results.append([['%.2f'%eps[3-j]*cap[3-j]/cap[0]  for j in range(3)]])
             gg_price = get_price(i, start_date=last_year, end_date=last_month+timedelta(1), frequency='daily', fields='close')
             scoreOfStock = 0
-            zcfzl = df_lastyear['total_liability'].values[0]/df_lastyear['total_sheet_owner_equities'].values[0]
+            zcfzl = round(df_lastyear['total_liability'].values[0]/df_lastyear['total_sheet_owner_equities'].values[0],2)
             if df_lastyear['pe_ratio'].values[0] <= pe_ration_max:
                 if zcfzl<0.5:
                     scoreOfStock += 1
@@ -197,17 +197,17 @@ def get_growth_stock(stock_list, flag_result):
                 if xdqd12 > xdqd1 and xdqd1 > 0:
                     scoreOfStock += 1
 
-                if scoreOfStock >= 2:
+                if scoreOfStock >= 2 or flag_pick:
                     list_pick.append(i)
                     if flag_result:
                         results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[3], cap_now, scoreOfStock] )
-    
+    # print results
     if flag_result:
         columns=[u'code', u'名称', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(2)).strftime("%m-%d") ] + ['%dEPS'% (yearL[j+start_yearth]) for j in range(4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
     # 
         czg = pd.DataFrame(data=results, columns=columns)
         czg.sort(columns=u'分数', ascending = False, inplace=True)
-        print czg
+        #print czg
         
     df_PEG = get_PEG(list_pick)
     
@@ -218,13 +218,13 @@ def get_growth_stock(stock_list, flag_result):
     
     list_can_buy = []    
     for i in range(len(df_sort_PEG.index)):
-        if df_sort_PEG.ix[i,0] < 0.6:
+        if df_sort_PEG.ix[i,0] < 0.6 or flag_pick:
             list_can_buy.append(df_sort_PEG.index[i])
         else:
             break
     if len(list_can_buy) < 5:
         for i in range(len(df_sort_PEG.index)):
-            if df_sort_PEG.ix[i,0] >= 0.6 and df_sort_PEG.ix[i,0] < 0.75:
+            if (df_sort_PEG.ix[i,0] >= 0.6 and df_sort_PEG.ix[i,0] < 0.75) or flag_pick:
                 list_can_buy.append(df_sort_PEG.index[i])
 
     
@@ -261,12 +261,13 @@ list1 = get_all_securities(['stock']).index[:1000]
 list2 = get_all_securities(['stock']).index[1001:2000]
 list3 = get_all_securities(['stock']).index[2001:]
 
+# get_growth_stock(list, result, notpick)
 stocks1 = set_feasible_stocks(list1) 
-result1 = get_growth_stock(stocks1, False)
+result1 = get_growth_stock(stocks1, False, False)
 stocks2 = set_feasible_stocks(list2) 
-result2 = get_growth_stock(stocks2, False)
+result2 = get_growth_stock(stocks2, False, False)
 stocks3 = set_feasible_stocks(list3) 
-result3 = get_growth_stock(stocks3, False)
+result3 = get_growth_stock(stocks3, False, False)
 results = []
 for i in result1:
     if i not in results:
@@ -274,9 +275,16 @@ for i in result1:
 for i in result2:
     if i not in results:
         results.append(i)
-for i in result2:
+for i in result3:
     if i not in results:
         results.append(i)
 print results
-df_czg = get_growth_stock(results, True)
+df_czg = get_growth_stock(results, True, False)
 df_czg
+
+
+# 不过滤
+print '---------------------------观察列表-------------------------'
+listbefore = ['002372.XSHE', '600035.XSHG', '600373.XSHG', '600522.XSHG', '600660.XSHG', '601009.XSHG', '603766.XSHG']
+df_gc = get_growth_stock(listbefore, True, True)
+
