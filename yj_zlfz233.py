@@ -169,7 +169,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick):
         df_lastyear = yearP[3+start_yearth][yearP[3+start_yearth].code==i]
         if flag_cz:
             #results.append([['%.2f'%eps[3-j]*cap[3-j]/cap[0]  for j in range(3)]])
-            gg_price = get_price(i, start_date=last_year, end_date=last_month+timedelta(1), frequency='daily', fields='close')
+            gg_price = get_price(i, start_date=last_year, end_date=now, frequency='daily', fields='close')
             scoreOfStock = 0
             zcfzl = round(df_lastyear['total_liability'].values[0]/df_lastyear['total_sheet_owner_equities'].values[0],2)
             if df_lastyear['pe_ratio'].values[0] <= pe_ration_max:
@@ -203,7 +203,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick):
                         results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[3], cap_now, scoreOfStock] )
     # print results
     if flag_result:
-        columns=[u'code', u'名称', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(2)).strftime("%m-%d") ] + ['%dEPS'% (yearL[j+start_yearth]) for j in range(4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
+        columns=[u'code', u'名称', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(1)).strftime("%m-%d") ] + ['%dEPS'% (yearL[j+start_yearth]) for j in range(4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
     # 
         czg = pd.DataFrame(data=results, columns=columns)
         czg.sort(columns=u'分数', ascending = False, inplace=True)
@@ -222,7 +222,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick):
             list_can_buy.append(df_sort_PEG.index[i])
         else:
             break
-    if len(list_can_buy) < 5:
+    if len(list_can_buy) < 10:
         for i in range(len(df_sort_PEG.index)):
             if (df_sort_PEG.ix[i,0] >= 0.6 and df_sort_PEG.ix[i,0] < 0.75) or flag_pick:
                 list_can_buy.append(df_sort_PEG.index[i])
@@ -241,7 +241,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick):
                 + [df_buy[str(yearL[start_yearth+1])+'EPS'].values[0] ] \
                 + [df_buy[str(yearL[start_yearth+2])+'EPS'].values[0] ] \
                 + [df_buy[str(yearL[start_yearth+3])+'EPS'].values[0] ] \
-                + [df_buy[(datetime.now()-timedelta(2)).strftime("%m-%d")].values[0], \
+                + [df_buy[(datetime.now()-timedelta(1)).strftime("%m-%d")].values[0], \
                 df_buy[u'现金比'].values[0], df_buy[u'12L'].values[0], 
                 df_buy[u'12H'].values[0], df_buy[u'负债率'].values[0], \
                 df_buy[u'上年股本'].values[0], df_buy[u'现股本'].values[0], \
@@ -249,7 +249,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick):
         
         columns2=[u'code', u'名称', u'PEG', u'1月强度', u'1年强度'] \
             + ['%dEPS'% (yearL[j+start_yearth]) for j in range(4)] \
-            + [(datetime.now()-timedelta(2)).strftime("%m-%d") ] \
+            + [(datetime.now()-timedelta(1)).strftime("%m-%d") ] \
             + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
         czg_buy = pd.DataFrame(data=buy_list, columns=columns2)
         return czg_buy
