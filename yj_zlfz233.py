@@ -282,50 +282,52 @@ list3 = get_all_securities(['stock']).index[2001:]
 list1 = ['600027.XSHG', '002367.XSHE', '002508.XSHE']
 '''
 
+def pick_stocks(flag_st, year, month):
+    list1 = get_all_securities(['stock']).index[:1000]
+    list2 = get_all_securities(['stock']).index[1001:2000]
+    list3 = get_all_securities(['stock']).index[2001:]
 
-list1 = get_all_securities(['stock']).index[:1000]
-list2 = get_all_securities(['stock']).index[1001:2000]
-list3 = get_all_securities(['stock']).index[2001:]
+
+    # get_growth_stock(list, result, notpick)
+    if flag_st:
+        list1 = set_feasible_stocks(list1) 
+        list2 = set_feasible_stocks(list2) 
+        list3 = set_feasible_stocks(list3) 
+        
+    result1 = []
+    result2 = []
+    result3 = []
+    result1 = get_growth_stock(list1, False, False, year, month)
+    result2 = get_growth_stock(list2, False, False, year, month)
+    result3 = get_growth_stock(list3, False, False, year, month)
+    results = []
+
+    for i in result1:
+        if i not in results:
+            results.append(i)
+    for i in result2:
+        if i not in results:
+            results.append(i)
+    for i in result3:
+        if i not in results:
+            results.append(i)
+    return results
+    
+
+
+# 不过滤
+listbefore = ['002202.XSHE', '002372.XSHE', '600114.XSHG', '000501.XSHE', '600522.XSHG', '601009.XSHG', '601199.XSHG']
+# listbefore = ['600027.XSHG', '002367.XSHE', '002508.XSHE']
 
 now = datetime.now()  
 year = now.year
 month = now.month
-year = 2015
-month = 5
-
+#year = 2015
+#month = 5
 flag_st = False
-# get_growth_stock(list, result, notpick)
-if flag_st:
-    list1 = set_feasible_stocks(list1) 
-    list2 = set_feasible_stocks(list2) 
-    list3 = set_feasible_stocks(list3) 
-    
-result1 = []
-result2 = []
-result3 = []
-result1 = get_growth_stock(list1, False, False, year, month)
-result2 = get_growth_stock(list2, False, False, year, month)
-result3 = get_growth_stock(list3, False, False, year, month)
-results = []
+results = pick_stocks(flag_st, year, month)
 
-for i in result1:
-    if i not in results:
-        results.append(i)
-for i in result2:
-    if i not in results:
-        results.append(i)
-for i in result3:
-    if i not in results:
-        results.append(i)
-print results
+df_gc = get_growth_stock(listbefore, True, True, year, month)
 df_czg = get_growth_stock(results, True, False, year, month)
 df_czg
-
-
-# 不过滤
-print '---------------------------观察列表-------------------------'
-listbefore = ['002202.XSHE', '002372.XSHE', '600114.XSHG', '000501.XSHE', '600522.XSHG', '601009.XSHG', '601199.XSHG']
-#
-listbefore = ['600027.XSHG', '002367.XSHE', '002508.XSHE']
-df_gc = get_growth_stock(listbefore, True, True, year, month)
 
