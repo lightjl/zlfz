@@ -92,9 +92,7 @@ def get_growth_stock(stock_list, flag_result):
 	            indicator.inc_operation_profit_year_on_year,\
                 balance.total_liability, balance.total_sheet_owner_equities
                  ).filter(valuation.code.in_(list_stock))
-    now = datetime.now()  
-    year = now.year                   #year
-    month = now.month
+
     yearP1 = get_fundamentals(q_PE_G2, statDate=str(year-1))
     yearL = [year-5+i for i in range(5)]  # 2011 2012 2013 2014 2015 今年2016
     
