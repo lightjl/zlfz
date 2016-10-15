@@ -21,20 +21,24 @@ def initialize(context):
     # 加载统计模块
     if g.flag_stat:
         g.trade_stat = tradestat.trade_stat()
-    f = 12  # 调仓频率
-    g.Transfer_date = range(1,13,12/f)
-    run_monthly(Transfer,20)
+    #g.Transfer_date = range(1,13,12)
+    #run_monthly(Transfer,20)
 
 #1 
 #设置策略参数
 def set_params():
     g.num_stocks = 5                             # 每次调仓选取的最大股票数量
     g.stocks=get_all_securities(['stock']).index # 设置上市A股为初始股票池 000002.XSHG
-   
     
-    g.per = 0.1                                 # EPS增长率不低于0.25
+    g.per = 0.1                                  # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
     g.trade_skill = False                        # 开启交易策略
+    g.period = 5  			    				 # 调仓频率10天
+    g.days = 0
+    
+    g.lag = 20 # 回看前20天
+    g.zs2 = '000300.XSHG'  # 沪深300指数，表示二，大盘股
+    g.zs8 = '000905.XSHG'  # 中证500指数，表示八，小盘股
 
 #2
 #设置中间变量
@@ -55,6 +59,7 @@ def set_backtest():
 #每天开盘前要做的事情
 def before_trading_start(context):
     set_slip_fee(context)                 # 设置手续费与手续费
+    
     # 设置可行股票池
     
 #4
@@ -107,22 +112,49 @@ def set_slip_fee(context):
 每天交易时
 ================================================================================
 '''
-'''
+
 # 每天回测时做的事情
 def handle_data(context,data):
-    # 需买入的股票
-    list_to_buy = pick_buy_list(context, data, g.feasible_stocks)
-    # 待卖出的股票，list类型
-    list_to_sell = stocks_to_sell(context, data, list_to_buy)
-    # 卖出操作
-    sell_operation(context,list_to_sell)
-    # 买入操作
-    buy_operation(context, list_to_buy)
-'''
+    # 获得当前时间
+    hour = context.current_dt.hour
+    minute = context.current_dt.minute
+    
+    if hour ==10 and minute==50:
+        hs2 = getStockPrice(g.zs2, g.lag)
+        hs8 = getStockPrice(g.zs8, g.lag)
+        cp2 = data[g.zs2].close
+        cp8 = data[g.zs8].close
+       
+        if (not isnan(hs2)) and (not isnan(cp2)):
+            ret2 = (cp2 - hs2) / hs2;
+        else:
+            ret2 = 0
+        if (not isnan(hs8)) and (not isnan(cp8)):
+            ret8 = (cp8 - hs8) / hs8;
+        else:
+            ret8 = 0
+        #print(ret2,ret8)
+
+        log.info("当前%s指数的20日涨幅 [%.2f%%]" %(get_security_info(g.zs2).display_name, ret2*100))
+        log.info("当前%s指数的20日涨幅 [%.2f%%]" %(get_security_info(g.zs8).display_name, ret8*100))
+        
+        # 获得当前总资产
+        value = context.portfolio.portfolio_value
+        
+        log.info("调仓日计数 [%d]" %(g.days))
+
+        #奇怪，低于101%时清仓，回测效果出奇得好。
+        if ret2>0.01 or ret8>0.01 :  
+            #print('持有，每5天进行调仓')
+            Transfer(context)
+        else :
+            log.info("==> 清仓，卖出所有股票")
+            sell_all_stocks(context) 
+
 # 每个单位时间(如果按天回测,则每天调用一次,如果按分钟,则每分钟调用一次)调用一次
 def Transfer(context):
-    months = context.current_dt.month
-    if months in g.Transfer_date:
+    g.days += 1
+    if g.days % g.period == 1: 
         g.feasible_stocks = set_feasible_stocks(g.stocks,context)
         g.feasible_stocks = stocks_can_buy(context)
         log.debug(g.feasible_stocks)
@@ -655,6 +687,10 @@ def order_target_value_(security, value):
     # 部成部撤的报单，聚宽状态是已撤，此时成交量>0，可通过成交量判断是否有成交
     return order_target_value(security, value)
     
+def sell_all_stocks(context):
+    sell_operation(context, context.portfolio.positions.keys())
+    g.days = 0   
+    
 #9
 # 执行卖出操作
 # 输入：list_to_sell为list类型，表示待卖出的股票
@@ -664,7 +700,10 @@ def sell_operation(context, list_to_sell):
         position = context.portfolio.positions[stock_sell]
         close_position(position)
 
-
+def getStockPrice(stock, interval):
+    h = attribute_history(stock, interval, unit='1d', fields=('close'), skip_paused=True)
+    return h['close'].values[0]
+    
 #10
 # 执行买入操作
 # 输入：context(见API)；list_to_buy为list类型，表示待买入的股票
