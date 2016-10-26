@@ -29,8 +29,9 @@ def initialize(context):
 #设置策略参数
 def set_params():
     g.num_stocks = 5                             # 每次调仓选取的最大股票数量
+    g.num_stocks_min = 3						 # 单股票最大可持1/3资金
     g.stocks=get_all_securities(['stock']).index # 设置上市A股为初始股票池 000002.XSHG
-   
+    g.growth_stock = []
     
     g.per = 0.1                                 # EPS增长率不低于0.25
     g.flag_stat = True                           # 默认不开启统计
@@ -340,17 +341,19 @@ def stocks_can_buy(context):
     # 将存储有序股票代码index转换成list并取前g.num_stocks个为待买入的股票，返回list
 
     #nummax = min(len(df_PEG.index), g.num_stocks-len(context.portfolio.positions.keys()))
+    g.growth_stock = df_sort_PEG.index
         
-    for i in range(len(df_sort_PEG.index)):
-        if df_sort_PEG.ix[i,0] < 0.6:
+    for i in range(len(g.growth_stock)):
+        if df_sort_PEG.ix[i,0] < 0.375:
             list_can_buy.append(df_sort_PEG.index[i])
         else:
             break
+	'''
     if len(list_can_buy) < 3:
         for i in range(len(df_sort_PEG.index)):
             if df_sort_PEG.ix[i,0] >= 0.6 and df_sort_PEG.ix[i,0] < 0.75:
                 list_can_buy.append(df_sort_PEG.index[i])
-
+	'''
     return list_can_buy
     
     
@@ -473,8 +476,9 @@ def pick_buy_list(context, list_can_buy, list_to_sell):
             '''
     else:
         for stock in list_can_buy:
-            if stock in context.portfolio.positions.keys():
-                continue
+            # 调仓
+            #if stock in context.portfolio.positions.keys():
+            #    continue
             list_to_buy.append(stock)
             ad_num += 1
             if ad_num >= buy_num:
@@ -543,11 +547,49 @@ def get_clear_stock(context, stock_list_buy):
 
     len_df = len(df_PEG.index)
     for i in range(len_df):
-        if df_sort_PEG.ix[i,0] > 1.2:
+        if df_sort_PEG.ix[i,0] >= 0.75 or i not in g.growth_stock:
             list_to_sell.append(df_sort_PEG.index[i])
             #log.info("code=%s PEG>1.2", i)
             
     return list_to_sell
+# 获得均线卖出信号
+# 输入：context（见API文档）
+# 输出：list_to_sell为list类型，表示待卖出的股票
+def stocks_djx_to_sell(context):
+    list_to_sell = []
+    list_hold = context.portfolio.positions.keys()
+    if len(list_hold) == 0:
+        return list_to_sell
+    
+    for i in list_hold:
+        '''
+        close = history(1, '1d', 'close', [i],df = False)[i][0]
+        # 跌到MA60卖
+        ma60 = count_ma(i, 60, 0)
+        if close < ma60:
+            list_to_sell.append(i)
+            continue
+        '''
+        # 均线纠缠时，不进行操作
+        if is_struggle(count_ma(i,5,1),count_ma(i,10,1),count_ma(i,20,1)):
+            continue
+        # 空头排列——清仓卖出
+        if is_lowest_point(i,-1):
+            list_to_sell.append(i)
+        # 多头排列后死叉——清仓卖出 10 叉 20
+        elif is_crossDOWN(i,10,20):
+            list_to_sell.append(i)
+        hist = attribute_history(i, t, '1d', 'close', df=False)
+        if context.portfolio.positions[i].avg_cost *0.95 >= hist['close'][0]:
+            #亏损 5% 卖出
+            list_to_sell.append(i)
+        '''
+        if context.portfolio.positions[i].avg_cost *1.15 <= data[i].close:
+            #赚 10% 卖出
+            list_to_sell.append(i)
+        '''
+    return list_to_sell
+
 # 获得均线卖出信号
 # 输入：context（见API文档）
 # 输出：list_to_sell为list类型，表示待卖出的股票
@@ -618,8 +660,8 @@ def notBuyThenSell(context, list_to_buy):
 # 输出：list_to_sell为list类型，表示待卖出的股票
 def stocks_to_sell(context, list_to_buy):
     # 对于不需要持仓的股票，全仓卖出
-    list_to_sell = notBuyThenSell(context, list_to_buy)
-    # list_to_sell = get_clear_stock(context, list_to_buy)
+    # list_to_sell = notBuyThenSell(context, list_to_buy)
+    list_to_sell = get_clear_stock(context, list_to_buy)
     if g.trade_skill:
         list_to_sell2 = stocks_udma_to_sell(context)
         for i in list_to_sell2:
@@ -670,10 +712,12 @@ def sell_operation(context, list_to_sell):
 # 输入：context(见API)；list_to_buy为list类型，表示待买入的股票
 # 输出：none
 def buy_operation(context, list_to_buy):
+    num_buy = max(len(list_to_buy), g.num_stocks_min)
+    #log.info(num_buy)
     for stock_buy in list_to_buy:
         # 为每个持仓股票分配资金
-        g.capital_unit=context.portfolio.portfolio_value/g.num_stocks
-        # 买入在"待买股票列表"的股票
+        g.capital_unit=context.portfolio.portfolio_value/num_buy
+        # 买入或调仓在"待买股票列表"的股票
         order_target_value(stock_buy, g.capital_unit)
 
 '''
