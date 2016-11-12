@@ -217,7 +217,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
                 if scoreOfStock >= 2 or flag_pick:
                     list_pick.append(i)
                     if flag_result:
-                        results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [pe_now, xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[3], cap_now, scoreOfStock] )
+                        results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [pe_now, xdqd1, xdqd12, gg_price['close'][-1]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[3], cap_now, scoreOfStock] )
 
     if flag_result:
         columns=[u'code', u'名称', u'PE', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(1)).strftime("%m-%d") ] + ['%dEPS'% (-4+j) for j in range(4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
@@ -312,11 +312,26 @@ def pick_stocks(flag_st, year, month):
         if i not in results:
             results.append(i)
     return results
-    
+
+# 输入：dataframe_init 成长股的dataframe数据
+# 输出：df_potentialValue
+def Potential_value(dataframe_init):
+    df_potentialValue=dataframe_init
+    df_potentialValue.index = list(df_potentialValue['code'])
+    df_potentialValue=df_potentialValue.drop(['code', u'1月强度', u'1年强度'],axis=1)
+    df_potentialValue=df_potentialValue.drop(['-4EPS', '-3EPS', '-2EPS', '-1EPS'],axis=1)
+    df_potentialValue=df_potentialValue.drop([u'现金比', u'负债率', u'上年股本', u'现股本'], axis=1)
+    df_potentialValue['12H%']=(df_potentialValue['12H']/df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]-1)*100
+    df_potentialValue[u'peg价格']=df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]/df_potentialValue['PEG']*0.6
+    df_potentialValue['peg%']=(df_potentialValue[u'peg价格']/df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]-1)*100
+    df_potentialValue[u'pe价格']=df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]/df_potentialValue['PE']*30
+    df_potentialValue['pe%']=(df_potentialValue[u'pe价格']/df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]-1)*100
+    return df_potentialValue
+
 
 
 # 不过滤
-listbefore = ['002202.XSHE', '002372.XSHE', '600114.XSHG', '000501.XSHE', '600522.XSHG', '601009.XSHG', '601199.XSHG']
+listbefore = ['002078.XSHE', '002372.XSHE', '600522.XSHG', '000501.XSHE', '600176.XSHG', '601009.XSHG', '600373.XSHG', '600066.XSHG']
 # listbefore = ['600027.XSHG', '002367.XSHE', '002508.XSHE']
 
 now = datetime.now()  
@@ -329,5 +344,7 @@ results = pick_stocks(flag_st, year, month)
 
 df_gc = get_growth_stock(listbefore, True, True, year, month)
 df_czg = get_growth_stock(results, True, False, year, month)
+df_czgPotentialValue = Potential_value(df_czg)
+df_gcPotentialValue = Potential_value(df_gc)
 df_czg
 
