@@ -135,6 +135,9 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
         last_2month = last_2month-timedelta(1) 
     while last_year not in dp_price.index:
         last_year = last_year-timedelta(1)
+    last_day = date(year,month,now.day)-timedelta(1)
+    while last_day not in dp_price.index:
+        last_day = last_day-timedelta(1)
     # print dp_price
     # print yearP[1]
     #todo： 去年全部 年报已公开，明年昨日再改
@@ -186,7 +189,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
         df_lastyear = yearP[3+start_yearth][yearP[3+start_yearth].code==i]
         if flag_cz or flag_pick:
             #results.append([['%.2f'%eps[3-j]*cap[3-j]/cap[0]  for j in range(3)]])
-            gg_price = get_price(i, start_date=last_year, end_date=now, frequency='daily', fields='close')
+            gg_price = get_price(i, start_date=last_year, end_date=last_day, frequency='daily', fields='close')
             scoreOfStock = 0
             zcfzl = round(df_lastyear['total_liability'].values[0]/df_lastyear['total_sheet_owner_equities'].values[0],2)
             if df_lastyear['pe_ratio'].values[0] <= pe_ration_max or flag_pick:
@@ -198,7 +201,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
                 
                 if df_lastyear['subtotal_operate_cash_inflow'].values[0] - df_lastyear['subtotal_operate_cash_outflow'].values[0] > df_lastyear['basic_eps'].values[0]*df_lastyear['capitalization'].values[0]*10000:
                     scoreOfStock += 1
-            # print gg_price['close'].describe()['max']
+                # print gg_price['close'].describe()['max']
                 high_price = gg_price['close'].describe()['max']
                 low_price = gg_price['close'].describe()['min']
                 dpqd1 = (dp_price['close'][last_month]-dp_price['close'][last_2month])/dp_price['close'][last_2month]
