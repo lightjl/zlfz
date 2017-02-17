@@ -1,5 +1,6 @@
 '''
 现金比,负债率 上年
+PEG's G 上年比前年的增长率,甚至前年比大前年的增长率
 '''
 import time
 from datetime import date
@@ -31,13 +32,13 @@ def filter_st_stock(initial_stocks):
 # 输入：context(见API)；stock_list为list类型，表示股票池
 # 输出：df_PEG为dataframe: index为股票代码，data为相应的PEG值
 # flag_pick 是否挑选，是挑选
-def get_PEG(stock_list, flag_pick, year, month): 
+def get_PEG(stock_list, flag_pick, year, month, day=1): 
     # 查询股票池里股票的市盈率，营业利润同比增长率
     q_PE_G = query(valuation.code, valuation.pe_ratio, indicator.inc_operation_profit_year_on_year
                  ).filter(valuation.code.in_(stock_list)) 
     # 得到一个dataframe：包含股票代码、市盈率PE、收益增长率G
     # 默认date = context.current_dt的前一天,使用默认值，避免未来函数，不建议修改
-    df_PE_G = get_fundamentals(q_PE_G, date=str(year)+'-'+str(month)+'-'+str(1))
+    df_PE_G = get_fundamentals(q_PE_G, date=str(year)+'-'+str(month)+'-'+str(day))
     # 筛选出成长股：删除市盈率或收益增长率为负值的股票
     if flag_pick:
         df_Growth_PE_G = df_PE_G
@@ -60,7 +61,7 @@ def get_PEG(stock_list, flag_pick, year, month):
     df_PEG = pd.DataFrame(Series_PEG)
     return df_PEG
 # flag_pick 是否跳过挑选，是不挑选
-def get_growth_stock(stock_list, flag_result, flag_pick, year, month): 
+def get_growth_stock(stock_list, flag_result, flag_pick, year, month, day=1): 
     print 'start'
     pe_ration_max = 40
     # 查询股票池里股票的市盈率，收益增长率 indicator.inc_operation_profit_year_on_year
@@ -68,7 +69,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
                  ).filter(valuation.code.in_(stock_list)) 
     # 得到一个dataframe：包含股票代码、市盈率PE、收益增长率G
     # 默认date = context.current_dt的前一天,使用默认值，避免未来函数，不建议修改
-    df_PE_G = get_fundamentals(q_PE_G, date=str(year)+'-'+str(month)+'-'+str(1))
+    df_PE_G = get_fundamentals(q_PE_G, date=str(year)+'-'+str(month)+'-'+str(day))
     # 筛选出成长股：删除市盈率或收益增长率为负值的股票
 
 
@@ -89,14 +90,15 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
             
     
     # 去掉超大盘 000043.XSHG 399980.XSHE
-    cdp = get_index_stocks('000043.XSHG')
-    for i in cdp:
-        if i in list_stock:
-            list_stock.remove(i)
-    cdp = get_index_stocks('399980.XSHE')
-    for i in cdp:
-        if i in list_stock:
-            list_stock.remove(i)
+    if not flag_pick:
+        cdp = get_index_stocks('000043.XSHG')
+        for i in cdp:
+            if i in list_stock:
+                list_stock.remove(i)
+        cdp = get_index_stocks('399980.XSHE')
+        for i in cdp:
+            if i in list_stock:
+                list_stock.remove(i)
             
     
     q_PE_G2 = query(valuation.code, valuation.capitalization, \
@@ -119,7 +121,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
     yearP = [get_fundamentals(q_PE_G2, statDate=str(yearL[i])) for i in range(5)]
     
     q_now = query(valuation.code, valuation.capitalization, valuation.pe_ratio)
-    df_now = get_fundamentals(q_now, date=str(year)+'-'+str(month)+'-'+str(1))
+    df_now = get_fundamentals(q_now, date=str(year)+'-'+str(month)+'-'+str(day))
     last_month = date(year,month,1)-timedelta(1) 
     if month > 1:
          last_2month = date(year,month-1,1)-timedelta(1)
@@ -128,14 +130,22 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
     last_year = date(year-1,month,1)-timedelta(1) 
 
     dp_price = get_price('000001.XSHG', start_date=last_year-timedelta(20), \
-        end_date=last_month+timedelta(1) , frequency='daily', fields='close')
+        end_date=now, frequency='daily', fields='close')
     while last_month not in dp_price.index:
         last_month = last_month-timedelta(1) 
     while last_2month not in dp_price.index:
         last_2month = last_2month-timedelta(1) 
     while last_year not in dp_price.index:
         last_year = last_year-timedelta(1)
-    # print dp_price
+    if now.hour < 15:
+        last_day = date(year,month,now.day)-timedelta(1)
+    else:
+        last_day = date(year,month,now.day)
+    # print now.hour
+    # print last_day
+    while last_day not in dp_price.index:
+        last_day = last_day-timedelta(1)
+    print last_day
     # print yearP[1]
     #todo： 去年全部 年报已公开，明年昨日再改
     # 2013 2014 2015
@@ -186,7 +196,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
         df_lastyear = yearP[3+start_yearth][yearP[3+start_yearth].code==i]
         if flag_cz or flag_pick:
             #results.append([['%.2f'%eps[3-j]*cap[3-j]/cap[0]  for j in range(3)]])
-            gg_price = get_price(i, start_date=last_year, end_date=now, frequency='daily', fields='close')
+            gg_price = get_price(i, start_date=last_year, end_date=last_day, frequency='daily', fields='close')
             scoreOfStock = 0
             zcfzl = round(df_lastyear['total_liability'].values[0]/df_lastyear['total_sheet_owner_equities'].values[0],2)
             if df_lastyear['pe_ratio'].values[0] <= pe_ration_max or flag_pick:
@@ -198,7 +208,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
                 
                 if df_lastyear['subtotal_operate_cash_inflow'].values[0] - df_lastyear['subtotal_operate_cash_outflow'].values[0] > df_lastyear['basic_eps'].values[0]*df_lastyear['capitalization'].values[0]*10000:
                     scoreOfStock += 1
-            # print gg_price['close'].describe()['max']
+                # print gg_price['close'].describe()['max']
                 high_price = gg_price['close'].describe()['max']
                 low_price = gg_price['close'].describe()['min']
                 dpqd1 = (dp_price['close'][last_month]-dp_price['close'][last_2month])/dp_price['close'][last_2month]
@@ -217,7 +227,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month):
                 if scoreOfStock >= 2 or flag_pick:
                     list_pick.append(i)
                     if flag_result:
-                        results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [pe_now, xdqd1, xdqd12, gg_price['close'][-2]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[3], cap_now, scoreOfStock] )
+                        results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [pe_now, xdqd1, xdqd12, gg_price['close'][-1]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[3], cap_now, scoreOfStock] )
 
     if flag_result:
         columns=[u'code', u'名称', u'PE', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(1)).strftime("%m-%d") ] + ['%dEPS'% (-4+j) for j in range(4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
@@ -282,50 +292,71 @@ list3 = get_all_securities(['stock']).index[2001:]
 list1 = ['600027.XSHG', '002367.XSHE', '002508.XSHE']
 '''
 
+def pick_stocks(flag_st, year, month, day):
+    list1 = get_all_securities(['stock']).index[:1000]
+    list2 = get_all_securities(['stock']).index[1001:2000]
+    list3 = get_all_securities(['stock']).index[2001:]
 
-list1 = get_all_securities(['stock']).index[:1000]
-list2 = get_all_securities(['stock']).index[1001:2000]
-list3 = get_all_securities(['stock']).index[2001:]
+
+    # get_growth_stock(list, result, notpick)
+    if flag_st:
+        list1 = set_feasible_stocks(list1) 
+        list2 = set_feasible_stocks(list2) 
+        list3 = set_feasible_stocks(list3) 
+        
+    result1 = []
+    result2 = []
+    result3 = []
+    result1 = get_growth_stock(list1, False, False, year, month, day)
+    result2 = get_growth_stock(list2, False, False, year, month, day)
+    result3 = get_growth_stock(list3, False, False, year, month, day)
+    results = []
+
+    for i in result1:
+        if i not in results:
+            results.append(i)
+    for i in result2:
+        if i not in results:
+            results.append(i)
+    for i in result3:
+        if i not in results:
+            results.append(i)
+    return results
+
+# 输入：dataframe_init 成长股的dataframe数据
+# 输出：df_potentialValue
+def Potential_value(dataframe_init):
+    df_potentialValue=dataframe_init
+    df_potentialValue.index = list(df_potentialValue['code'])
+    df_potentialValue=df_potentialValue.drop(['code', u'1月强度', u'1年强度'],axis=1)
+    df_potentialValue=df_potentialValue.drop(['-4EPS', '-3EPS', '-2EPS', '-1EPS'],axis=1)
+    df_potentialValue=df_potentialValue.drop([u'现金比', u'负债率', u'上年股本', u'现股本'], axis=1)
+    df_potentialValue['12H%']=(df_potentialValue['12H']/df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]-1)*100
+    df_potentialValue[u'peg价格']=df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]/df_potentialValue['PEG']*0.6
+    df_potentialValue['peg%']=(df_potentialValue[u'peg价格']/df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]-1)*100
+    df_potentialValue[u'pe价格']=df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]/df_potentialValue['PE']*30
+    df_potentialValue['pe%']=(df_potentialValue[u'pe价格']/df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]-1)*100
+    return df_potentialValue
+
+
+
+# 不过滤
+listbefore = ['002078.XSHE', '002372.XSHE', '600522.XSHG', '000501.XSHE', '600176.XSHG', \
+              '601009.XSHG', '600373.XSHG', '600066.XSHG']
+# listbefore = ['600027.XSHG', '002367.XSHE', '002508.XSHE']
 
 now = datetime.now()  
 year = now.year
 month = now.month
-year = 2015
-month = 5
-
+day = now.day
+#year = 2015
+#month = 5
 flag_st = False
-# get_growth_stock(list, result, notpick)
-if flag_st:
-    list1 = set_feasible_stocks(list1) 
-    list2 = set_feasible_stocks(list2) 
-    list3 = set_feasible_stocks(list3) 
-    
-result1 = []
-result2 = []
-result3 = []
-result1 = get_growth_stock(list1, False, False, year, month)
-result2 = get_growth_stock(list2, False, False, year, month)
-result3 = get_growth_stock(list3, False, False, year, month)
-results = []
+results = pick_stocks(flag_st, year, month, day)
 
-for i in result1:
-    if i not in results:
-        results.append(i)
-for i in result2:
-    if i not in results:
-        results.append(i)
-for i in result3:
-    if i not in results:
-        results.append(i)
-print results
-df_czg = get_growth_stock(results, True, False, year, month)
+df_gc = get_growth_stock(listbefore, True, True, year, month, day)
+df_czg = get_growth_stock(results, True, False, year, month, day)
+df_czgPotentialValue = Potential_value(df_czg)
+df_gcPotentialValue = Potential_value(df_gc)
 df_czg
-
-
-# 不过滤
-print '---------------------------观察列表-------------------------'
-listbefore = ['002202.XSHE', '002372.XSHE', '600114.XSHG', '000501.XSHE', '600522.XSHG', '601009.XSHG', '601199.XSHG']
-#
-listbefore = ['600027.XSHG', '002367.XSHE', '002508.XSHE']
-df_gc = get_growth_stock(listbefore, True, True, year, month)
 
