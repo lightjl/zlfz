@@ -34,35 +34,57 @@ def filter_st_stock(initial_stocks):
 # flag_pick 是否挑选，是挑选
 def get_PEG(stock_list, flag_pick, year, month, day=1): 
     # 查询股票池里股票的市盈率，营业利润同比增长率
-    q_PE_G = query(valuation.code, valuation.pe_ratio, indicator.inc_operation_profit_year_on_year
-                 ).filter(valuation.code.in_(stock_list)) 
+    q_PE_G = query(valuation.code, income.np_parent_company_owners, 
+                  income.pubDate).filter(valuation.code.in_(stock_list)) 
+    q_now = query(valuation.code, valuation.pe_ratio)
+    df_now = get_fundamentals(q_now, date=str(year)+'-'+str(month)+'-'+str(day))
     # 得到一个dataframe：包含股票代码、市盈率PE、收益增长率G
     # 默认date = context.current_dt的前一天,使用默认值，避免未来函数，不建议修改
-    df_PE_G = get_fundamentals(q_PE_G, date=str(year)+'-'+str(month)+'-'+str(day))
+    yearP1 = get_fundamentals(q_PE_G, statDate=str(year-1))
+    yearP2 = get_fundamentals(q_PE_G, statDate=str(year-2))
+    yearP3 = get_fundamentals(q_PE_G, statDate=str(year-3))
+    d = datetime(year, month, day)
+    currenttime = '{:%Y-%m-%d}'.format(d)
+    #yearP1['pubtime'] = map(lambda x: int(x.split('-')[0]+x.split('-')[1]+x.split('-')[2]) ,yearP1['pubDate'])
+    #print (yearP1)
+    yearP1 = yearP1[(yearP1.pubDate < currenttime)]
     # 筛选出成长股：删除市盈率或收益增长率为负值的股票
+    list_pick = []
     if flag_pick:
-        df_Growth_PE_G = df_PE_G
+        #预筛选
+        list_pick = yearP3[(yearP3.np_parent_company_owners >0)]['code']
+        #print (list_pick)
     else:
-        df_Growth_PE_G = df_PE_G[(df_PE_G.pe_ratio >0)&(df_PE_G.inc_operation_profit_year_on_year >0)]
-    # 去除PE或G值为非数字的股票所在行
-    df_Growth_PE_G.dropna()
+        list_pick = stock_list
+    results = []
+    for i in list_pick:
+        if yearP2[yearP2.code == i].empty or yearP3[yearP3.code == i].empty:
+            continue
+        if df_now[df_now.code == i].empty:
+            continue
+        pe = df_now[df_now.code == i]['pe_ratio'].values[0]
+        if yearP1[yearP1.code == i].empty:
+            pro_last = yearP2[yearP2.code == i]['np_parent_company_owners'].values[0]
+            pro_last2 = yearP3[yearP3.code == i]['np_parent_company_owners'].values[0]
+        else:
+            pro_last = yearP1[yearP1.code == i]['np_parent_company_owners'].values[0]
+            pro_last2 = yearP2[yearP2.code == i]['np_parent_company_owners'].values[0]
+        inc = round((pro_last-pro_last2)/pro_last2*100,3)
+        peg = round(pe/inc,2)
+        results.append([i, all_stcok.ix[i].display_name.replace(' ', ''),\
+                        pe, pro_last, pro_last2, inc, peg])
+    columns = ['code', 'name', 'pe', 'pro_last', 'pro_last2', 'inc', 'peg']
+    # 筛选出成长股：删除市盈率或收益增长率为负值的股票
+    PEG_df = pd.DataFrame(data=results, columns=columns)
+    PEG_df = PEG_df[(PEG_df.peg>0) & (PEG_df.inc>0)]
+    PEG_df.index = PEG_df['code'].tolist()
+    PEG_df.drop(labels=['code'], axis=1,inplace = True)
+    PEG_df = PEG_df.sort(columns=['peg'], ascending=[1])
+    return PEG_df
     
-    # print df_Growth_PE_G
-    
-    # 得到一个Series：存放股票的市盈率TTM，即PE值
-    Series_PE = df_Growth_PE_G.ix[:,'pe_ratio']
-    # 得到一个Series：存放股票的收益增长率，即G值
-    Series_G = df_Growth_PE_G.ix[:,'inc_operation_profit_year_on_year']
-    # 得到一个Series：存放股票的PEG值
-    Series_PEG = Series_PE/Series_G
-    # 将股票与其PEG值对应
-    Series_PEG.index = df_Growth_PE_G.ix[:,0]
-    # 将Series类型转换成dataframe类型
-    df_PEG = pd.DataFrame(Series_PEG)
-    return df_PEG
 # flag_pick 是否跳过挑选，是不挑选
 def get_growth_stock(stock_list, flag_result, flag_pick, year, month, day=1): 
-    print 'start'
+    print ('start')
     pe_ration_max = 40
     # 查询股票池里股票的市盈率，收益增长率 indicator.inc_operation_profit_year_on_year
     q_PE_G = query(valuation.code, valuation.pe_ratio, indicator.inc_operation_profit_year_on_year
@@ -145,7 +167,7 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month, day=1):
     # print last_day
     while last_day not in dp_price.index:
         last_day = last_day-timedelta(1)
-    print last_day
+    print (last_day)
     # print yearP[1]
     #todo： 去年全部 年报已公开，明年昨日再改
     # 2013 2014 2015
@@ -171,15 +193,13 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month, day=1):
                 flag_empty = True
                 break
         if flag_empty:
-            continue
-        
+            continue        
         
         eps = [1]*4
         for j in range(4):
             eps[j] = yearP[j+start_yearth][yearP[j+start_yearth].code==i]['basic_eps'].values[0]
         if eps[0]<0:
-            continue
-        
+            continue        
             
         # eps = [ yearP[j][ (yearP[j].code==i).loc[0, 'basic_eps'] ] for j in range(4) ]
         # print eps
@@ -227,19 +247,20 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month, day=1):
                 if scoreOfStock >= 2 or flag_pick:
                     list_pick.append(i)
                     if flag_result:
-                        results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [pe_now, xdqd1, xdqd12, gg_price['close'][-1]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, cap[3], cap_now, scoreOfStock] )
+                        results.append([i, all_stcok.ix[i].display_name.replace(' ', '')] + [pe_now, xdqd1, xdqd12, gg_price['close'][-1]] + ['%.2f'%(eps[j]*cap[j]/cap_now)  for j in range(4)] + [xjlb, low_price, high_price, zcfzl, scoreOfStock] )
 
     if flag_result:
-        columns=[u'code', u'名称', u'PE', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(1)).strftime("%m-%d") ] + ['%dEPS'% (-4+j) for j in range(4)] + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
+        columns=[u'code', u'名称', u'PE', u'1月强度', u'1年强度']+[(datetime.now()-timedelta(1)).strftime("%m-%d") ] + ['%dEPS'% (-4+j) for j in range(4)] + [ u'现金比', u'12L', u'12H', u'负债率',  u'分数']
     # 
         czg = pd.DataFrame(data=results, columns=columns)
         czg.sort(columns=u'分数', ascending = False, inplace=True)
         #print czg
         
     # flag_pick 是否跳过挑选，是不挑选
-    df_PEG = get_PEG(list_pick, flag_pick, year, month)
-    
-    df_sort_PEG = df_PEG.sort(columns=[0], ascending=[1])
+    df_PEG = get_PEG(list_pick, flag_pick, year, month, day)
+    df_sort_PEG = df_PEG.drop(labels=['name', 'pe', 'pro_last', \
+                    'pro_last2', 'inc'], axis=1,inplace = False)
+
     # 将存储有序股票代码index转换成list并取前g.num_stocks个为待买入的股票，返回list
     #nummax = min(len(df_PEG.index), g.num_stocks-len(.portfolio.positions.keys()))
     
@@ -254,7 +275,8 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month, day=1):
             for i in range(len(df_sort_PEG.index)):
                 if df_sort_PEG.ix[i,0] >= 0.6 and df_sort_PEG.ix[i,0] < 0.75:
                     list_can_buy.append(df_sort_PEG.index[i])
-
+                    
+    list_can_buy = df_sort_PEG.index
     
     if flag_result:
         czg_buy = pd.DataFrame() 
@@ -262,9 +284,10 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month, day=1):
         buy_list = []
         for i in list_can_buy:
             df_buy = czg[czg.code==i]
-            
+            #print (df_PEG)
+            inc = df_PEG.loc[i]['inc']
             buy_list.append([ i, df_buy[u'名称'].values[0], df_buy[u'PE'].values[0], \
-                round(df_sort_PEG.ix[i,0],2), \
+                round(df_sort_PEG.ix[i,0],2), inc, \
                 df_buy[u'1月强度'].values[0], df_buy[u'1年强度'].values[0] ] 
                 + [df_buy[str(-4)+'EPS'].values[0] ] \
                 + [df_buy[str(-3)+'EPS'].values[0] ] \
@@ -273,13 +296,12 @@ def get_growth_stock(stock_list, flag_result, flag_pick, year, month, day=1):
                 + [df_buy[(datetime.now()-timedelta(1)).strftime("%m-%d")].values[0], \
                 df_buy[u'现金比'].values[0], df_buy[u'12L'].values[0], 
                 df_buy[u'12H'].values[0], df_buy[u'负债率'].values[0], \
-                df_buy[u'上年股本'].values[0], df_buy[u'现股本'].values[0], \
                 df_buy[u'分数'].values[0] ] )
         
-        columns2=[u'code', u'名称', u'PE', u'PEG', u'1月强度', u'1年强度'] \
+        columns2=[u'code', u'名称', u'PE', u'PEG', u'inc', u'1月强度', u'1年强度'] \
             + ['%dEPS'% (-4+j) for j in range(4)] \
             + [(datetime.now()-timedelta(1)).strftime("%m-%d") ] \
-            + [ u'现金比', u'12L', u'12H', u'负债率', u'上年股本', u'现股本', u'分数']
+            + [ u'现金比', u'12L', u'12H', u'负债率', u'分数']
         czg_buy = pd.DataFrame(data=buy_list, columns=columns2)
         return czg_buy
     return list_can_buy
@@ -330,7 +352,7 @@ def Potential_value(dataframe_init):
     df_potentialValue.index = list(df_potentialValue['code'])
     df_potentialValue=df_potentialValue.drop(['code', u'1月强度', u'1年强度'],axis=1)
     df_potentialValue=df_potentialValue.drop(['-4EPS', '-3EPS', '-2EPS', '-1EPS'],axis=1)
-    df_potentialValue=df_potentialValue.drop([u'现金比', u'负债率', u'上年股本', u'现股本'], axis=1)
+    df_potentialValue=df_potentialValue.drop([u'现金比', u'负债率'], axis=1)
     df_potentialValue['12H%']=(df_potentialValue['12H']/df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]-1)*100
     df_potentialValue[u'peg价格']=df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]/df_potentialValue['PEG']*0.6
     df_potentialValue['peg%']=(df_potentialValue[u'peg价格']/df_potentialValue[(datetime.now()-timedelta(1)).strftime("%m-%d")]-1)*100
